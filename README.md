@@ -46,7 +46,7 @@ If the file doesn't exist, create it. Add the following:
   "mcpServers": {
     "apple-notes": {
       "command": "npx",
-      "args": ["-y", "@ailenshen/apple-notes-mcp"]
+      "args": ["-y", "@ailenshen/apple-notes-mcp@latest"]
     }
   }
 }
