@@ -4,7 +4,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { listNotes, searchNotes, listFolders, findNoteByTitle } from "./db.js";
-import { getNoteBody, createNote, deleteNote } from "./applescript.js";
+import { getNoteBody, createNote, deleteNote, updateNote } from "./applescript.js";
 
 const server = new McpServer({
   name: "apple-notes",
@@ -60,7 +60,7 @@ server.tool(
 // --- get_note ---
 server.tool(
   "get_note",
-  "Get the full HTML body of a note by its title. Optionally specify folder to disambiguate.",
+  "Get the full content of a note by its title, returned as Markdown. Optionally specify folder to disambiguate.",
   {
     title: z.string().describe("Note title (exact match)"),
     folder: z.string().optional().describe("Folder name to scope the search"),
@@ -93,6 +93,30 @@ server.tool(
       const title = await createNote(markdown, folder);
       return {
         content: [{ type: "text", text: `Note "${title}" created successfully${folder ? ` in folder "${folder}"` : ""}.` }],
+      };
+    } catch (e: unknown) {
+      return {
+        content: [{ type: "text", text: `Error: ${(e as Error).message}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// --- update_note ---
+server.tool(
+  "update_note",
+  "Update an existing note in Apple Notes. Deletes the old note and creates a new one with the given Markdown content, preserving the original folder.",
+  {
+    title: z.string().describe("Title of the existing note to update"),
+    markdown: z.string().describe("New Markdown content for the note. First line (with or without #) becomes the title."),
+    folder: z.string().optional().describe("Folder name to scope the search for the existing note"),
+  },
+  async ({ title, markdown, folder }) => {
+    try {
+      const newTitle = await updateNote(title, markdown, folder);
+      return {
+        content: [{ type: "text", text: `Note "${title}" updated successfully (new title: "${newTitle}").` }],
       };
     } catch (e: unknown) {
       return {

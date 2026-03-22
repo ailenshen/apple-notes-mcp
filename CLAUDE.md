@@ -72,7 +72,7 @@ npm run build
 npm test
 ```
 
-集成测试会创建一个带 UUID 后缀的临时笔记，走完 create → verify → update → verify → delete → verify 全流程，最后验证原有笔记数量未变。
+集成测试会创建一个带 UUID 后缀的临时笔记，走完 create → list → get → update → get → delete → get 全流程，最后验证原有笔记数量未变。
 
 ---
 
@@ -85,7 +85,7 @@ Claude Code / Claude Desktop（本地 stdio）
 MCP Server（stdio transport）
     │
     ├─ 读 ── SQLite 直连（列表/搜索）
-    │         + AppleScript（单篇正文 HTML，直接返回）
+    │         + AppleScript（单篇正文 HTML → turndown 转 Markdown）
     │
     ├─ 写 ── 临时 .md → open -g -a Notes → 自动确认 Import
     │         → 移动到目标文件夹 → show 选中笔记
@@ -98,10 +98,10 @@ MCP Server（stdio transport）
 
 ```
 src/
-├── index.ts          # MCP server 入口，注册 5 个工具，stdio transport
+├── index.ts          # MCP server 入口，注册 6 个工具，stdio transport
 ├── db.ts             # SQLite 直连 NoteStore.sqlite（readonly），list/search/find 查询
-├── applescript.ts    # AppleScript 封装：读正文、创建、删除
-└── test.ts           # 集成测试：create → get → update → get → delete → get
+├── applescript.ts    # AppleScript 封装：读正文（HTML→Markdown）、创建、更新、删除
+└── test.ts           # 集成测试：create → list → get → update → get → delete → get
 ```
 
 ---
@@ -123,17 +123,16 @@ MCP server 通过 stdio transport 运行，Claude Code 或 Claude Desktop 直接
 
 ---
 
-## MCP 工具集（5 个）
+## MCP 工具集（6 个）
 
 | 工具 | 参数 | 说明 |
 |------|------|------|
-| `list_notes` | `folder?`, `limit?` | SQLite 查询，返回标题、文件夹、日期、是否置顶等全部元数据 |
+| `list_notes` | `folder?`, `limit?` | SQLite 查询，返回标题、文件夹、日期、是否置顶等元数据 |
 | `search_notes` | `query`, `limit?` | SQLite LIKE 搜索标题和摘要 |
-| `get_note` | `title`, `folder?` | AppleScript 读正文，直接返回 HTML |
+| `get_note` | `title`, `folder?` | AppleScript 读正文 HTML，turndown 转 Markdown 返回 |
 | `create_note` | `markdown`, `folder?` | 导入 .md → 移动到目标文件夹 → 选中 → 清理 |
+| `update_note` | `title`, `markdown`, `folder?` | SQLite 查原文件夹 → delete → create 到原文件夹 |
 | `delete_note` | `title`, `folder?` | AppleScript 删除（移入 Recently Deleted） |
-
-**update = delete + create**，不单独提供 update 工具。
 
 ---
 
@@ -143,11 +142,11 @@ MCP server 通过 stdio transport 运行，Claude Code 或 Claude Desktop 直接
 
 AppleScript 遍历 900+ 篇笔记超 30 秒超时。SQLite 直连 `NoteStore.sqlite`（WAL + readonly）< 100ms，不锁库。
 
-### 2. 读正文 — AppleScript HTML 直接返回
+### 2. 读正文 — AppleScript HTML → turndown Markdown
 
 - SQLite 中正文是 gzip + protobuf 私有格式，逆向不可靠，排除
 - AppleScript `note.body()` 返回官方 HTML，单篇 ~1s 可接受
-- **不做 HTML → Markdown 转换**：LLM 直接读 HTML，省掉依赖和转换层
+- 使用 turndown 将 HTML 转为 Markdown 返回，对 LLM 更友好、节省 token
 
 ### 3. 写入 — `open -a Notes` 原生 Markdown 导入
 
@@ -210,7 +209,7 @@ AppleScript 遍历 900+ 篇笔记超 30 秒超时。SQLite 直连 `NoteStore.sql
 | 操作 | 路径 | 速度 |
 |------|------|------|
 | list_notes / search_notes | SQLite + JOIN | < 100ms |
-| get_note | AppleScript → HTML | ~1s |
+| get_note | AppleScript → HTML → Markdown | ~1s |
 | create_note | .md → open → 确认 → 移动 → 选中 → 切回 | ~3-4s |
 | delete_note | AppleScript | ~1s |
 | update_note（逻辑） | delete + create | ~4-5s |

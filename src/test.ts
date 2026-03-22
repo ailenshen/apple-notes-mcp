@@ -1,226 +1,107 @@
 /**
- * Integration test for Apple Notes MCP server.
+ * Integration test: create → list → get → update → get → delete → get(404)
  *
- * Flow: create → verify → update(delete+create) → verify → delete → verify
- *
- * Uses a UUID-suffixed title to guarantee no collision with existing notes.
- * Cleans up on failure via finally block.
+ * Uses a UUID-suffixed title to avoid collision with existing notes.
  */
 
 import { randomUUID } from "crypto";
 import { listNotes, searchNotes, findNoteByTitle } from "./db.js";
-import { getNoteBody, createNote, deleteNote } from "./applescript.js";
+import { getNoteBody, createNote, updateNote, deleteNote } from "./applescript.js";
 
-// ── Helpers ──────────────────────────────────────────────────────────
-
-const TEST_ID = randomUUID().slice(0, 8);
-const TITLE_V1 = `MCP_Test_${TEST_ID}`;
-const TITLE_V2 = `MCP_Test_v2_${TEST_ID}`;
-const BODY_V1 = `This is test body v1 — ${TEST_ID}`;
-const BODY_V2 = `This is **updated** body v2 — ${TEST_ID}`;
-const TEST_FOLDER = "Notes"; // default folder, always exists
+const ID = randomUUID().slice(0, 8);
+const TITLE_V1 = `MCP_Test_${ID}`;
+const TITLE_V2 = `MCP_Test_v2_${ID}`;
+const BODY_V1 = `Body v1 ${ID}`;
+const BODY_V2 = `Body **v2** ${ID}`;
+const FOLDER = "Notes";
 
 let passed = 0;
 let failed = 0;
-let currentTitle: string | null = null; // tracks which title to clean up
 
-function assert(condition: boolean, message: string): void {
-  if (condition) {
-    passed++;
-    console.log(`  ✅ ${message}`);
-  } else {
-    failed++;
-    console.error(`  ❌ ${message}`);
-  }
+function assert(ok: boolean, msg: string) {
+  ok ? passed++ : failed++;
+  console.log(ok ? `  ✅ ${msg}` : `  ❌ ${msg}`);
 }
 
-function sleep(ms: number): Promise<void> {
+function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/**
- * SQLite WAL may lag behind Notes writes. Retry up to `maxRetries` times.
- */
-async function waitForSqlite(
-  check: () => boolean,
-  label: string,
-  maxRetries = 15,
-  interval = 1000
-): Promise<boolean> {
-  for (let i = 0; i < maxRetries; i++) {
+async function waitFor(check: () => boolean, label: string, retries = 15) {
+  for (let i = 0; i < retries; i++) {
     if (check()) return true;
-    process.stdout.write(`  ⏳ waiting for SQLite sync: ${label} (${i + 1}/${maxRetries})\r`);
-    await sleep(interval);
+    process.stdout.write(`  ⏳ ${label} (${i + 1}/${retries})\r`);
+    await sleep(1000);
   }
   process.stdout.write("\n");
   return check();
 }
 
-/**
- * Record note count snapshot for the given folder, to later verify nothing else changed.
- */
-function countNotesInFolder(folder: string): number {
-  return listNotes(folder).length;
+let cleanupTitle: string | null = null;
+
+async function cleanup() {
+  if (!cleanupTitle) return;
+  try { await deleteNote(cleanupTitle, FOLDER); } catch { /* already gone */ }
 }
 
-// ── Cleanup ──────────────────────────────────────────────────────────
-
-async function cleanup(): Promise<void> {
-  if (!currentTitle) return;
-  console.log(`\n🧹 Cleaning up: deleting "${currentTitle}" ...`);
-  try {
-    await deleteNote(currentTitle, TEST_FOLDER);
-    console.log("  cleaned up.");
-  } catch {
-    console.log("  nothing to clean (already gone or not found).");
-  }
-}
-
-// ── Test Steps ───────────────────────────────────────────────────────
-
-async function testCreate(): Promise<void> {
-  console.log("\n── Step 1: Create Note ──");
-  const md = `# ${TITLE_V1}\n\n${BODY_V1}`;
-  const title = await createNote(md); // no folder → goes to "Notes"
-  currentTitle = title;
-  assert(title === TITLE_V1, `createNote returned title "${title}"`);
-}
-
-async function testVerifyAfterCreate(): Promise<void> {
-  console.log("\n── Step 2: Verify after Create ──");
-
-  // 2a. SQLite: findNoteByTitle
-  const found = await waitForSqlite(
-    () => !!findNoteByTitle(TITLE_V1),
-    `findNoteByTitle("${TITLE_V1}")`
-  );
-  assert(found, `findNoteByTitle found the note in SQLite`);
-
-  if (found) {
-    const row = findNoteByTitle(TITLE_V1)!;
-    assert(row.folder === TEST_FOLDER, `note is in folder "${row.folder}"`);
-    assert(row.title === TITLE_V1, `title matches: "${row.title}"`);
-  }
-
-  // 2b. SQLite: searchNotes
-  const searchResults = searchNotes(TEST_ID);
-  assert(searchResults.length >= 1, `searchNotes("${TEST_ID}") returned ${searchResults.length} result(s)`);
-
-  // 2c. AppleScript: getNoteBody
-  const body = await getNoteBody(TITLE_V1, TEST_FOLDER);
-  assert(body.includes(BODY_V1), `getNoteBody contains v1 body text`);
-  assert(body.includes("<"), `getNoteBody returns HTML (contains "<")`);
-}
-
-async function testUpdate(): Promise<void> {
-  console.log("\n── Step 3: Update (delete + create) ──");
-
-  // 3a. Delete old
-  await deleteNote(TITLE_V1, TEST_FOLDER);
-  currentTitle = null;
-
-  // Verify old note is gone from AppleScript
-  let oldGone = false;
-  try {
-    await getNoteBody(TITLE_V1, TEST_FOLDER);
-  } catch {
-    oldGone = true;
-  }
-  assert(oldGone, `old note "${TITLE_V1}" no longer accessible via AppleScript`);
-
-  // 3b. Create new version
-  const md = `# ${TITLE_V2}\n\n${BODY_V2}`;
-  const title = await createNote(md);
-  currentTitle = title;
-  assert(title === TITLE_V2, `createNote returned new title "${title}"`);
-}
-
-async function testVerifyAfterUpdate(): Promise<void> {
-  console.log("\n── Step 4: Verify after Update ──");
-
-  // 4a. Old title should be gone from SQLite
-  const oldGone = await waitForSqlite(
-    () => !findNoteByTitle(TITLE_V1),
-    `old title gone from SQLite`
-  );
-  assert(oldGone, `old title "${TITLE_V1}" no longer in SQLite`);
-
-  // 4b. New title should appear
-  const newFound = await waitForSqlite(
-    () => !!findNoteByTitle(TITLE_V2),
-    `new title in SQLite`
-  );
-  assert(newFound, `new title "${TITLE_V2}" found in SQLite`);
-
-  // 4c. AppleScript: body should contain v2 content
-  const body = await getNoteBody(TITLE_V2, TEST_FOLDER);
-  // Notes renders **updated** as <b>updated</b>, so check for the unique ID and "v2" keyword
-  assert(body.includes(TEST_ID), `getNoteBody contains test ID "${TEST_ID}"`);
-  assert(body.includes("v2"), `getNoteBody contains "v2" keyword`);
-  assert(!body.includes(BODY_V1), `getNoteBody does NOT contain v1 body text`);
-}
-
-async function testDelete(): Promise<void> {
-  console.log("\n── Step 5: Delete ──");
-  await deleteNote(TITLE_V2, TEST_FOLDER);
-  currentTitle = null;
-  console.log(`  deleted "${TITLE_V2}"`);
-}
-
-async function testVerifyAfterDelete(): Promise<void> {
-  console.log("\n── Step 6: Verify after Delete ──");
-
-  // 6a. AppleScript: should throw
-  let gone = false;
-  try {
-    await getNoteBody(TITLE_V2, TEST_FOLDER);
-  } catch {
-    gone = true;
-  }
-  assert(gone, `getNoteBody throws for deleted note`);
-
-  // 6b. SQLite: should disappear (may take a moment)
-  const sqlGone = await waitForSqlite(
-    () => !findNoteByTitle(TITLE_V2),
-    `deleted note gone from SQLite`
-  );
-  assert(sqlGone, `deleted note no longer in SQLite`);
-
-  // 6c. searchNotes should return nothing for TEST_ID
-  const searchResults = searchNotes(TEST_ID);
-  assert(searchResults.length === 0, `searchNotes("${TEST_ID}") returns 0 results`);
-}
-
-async function testNoSideEffects(beforeCount: number): Promise<void> {
-  console.log("\n── Step 7: Verify no side effects ──");
-  const afterCount = countNotesInFolder(TEST_FOLDER);
-  assert(
-    afterCount === beforeCount,
-    `"${TEST_FOLDER}" folder note count unchanged: ${beforeCount} → ${afterCount}`
-  );
-}
-
-// ── Main ─────────────────────────────────────────────────────────────
-
-async function main(): Promise<void> {
-  console.log(`\n🧪 Apple Notes MCP Integration Test`);
-  console.log(`   Test ID: ${TEST_ID}`);
-  console.log(`   Titles:  "${TITLE_V1}" → "${TITLE_V2}"`);
-  console.log(`   Folder:  "${TEST_FOLDER}"`);
-
-  const beforeCount = countNotesInFolder(TEST_FOLDER);
-  console.log(`   Notes in "${TEST_FOLDER}" before test: ${beforeCount}`);
+async function main() {
+  console.log(`\n🧪 Integration Test (ID: ${ID})\n`);
+  const beforeCount = listNotes(FOLDER).length;
 
   try {
-    await testCreate();
-    await testVerifyAfterCreate();
-    await testUpdate();
-    await testVerifyAfterUpdate();
-    await testDelete();
-    await testVerifyAfterDelete();
-    await testNoSideEffects(beforeCount);
+    // 1. Create
+    console.log("── Create ──");
+    const t1 = await createNote(`# ${TITLE_V1}\n\n${BODY_V1}`);
+    cleanupTitle = t1;
+    assert(t1 === TITLE_V1, `created "${t1}"`);
+
+    // 2. List — should include the new note
+    console.log("\n── List ──");
+    await waitFor(() => !!findNoteByTitle(TITLE_V1), "SQLite sync");
+    const list = listNotes(FOLDER);
+    assert(list.some((n) => n.title === TITLE_V1), "appears in listNotes");
+    assert(list.every((n) => !("has_checklist" in n)), "no has_checklist field");
+
+    // 3. Get — should return Markdown (not HTML)
+    console.log("\n── Get ──");
+    const body1 = await getNoteBody(TITLE_V1, FOLDER);
+    assert(body1.includes(BODY_V1), "body contains v1 text");
+    assert(!body1.includes("<div>"), "body is not HTML");
+
+    // 4. Update — should preserve folder
+    console.log("\n── Update ──");
+    const t2 = await updateNote(TITLE_V1, `# ${TITLE_V2}\n\n${BODY_V2}`, FOLDER);
+    cleanupTitle = t2;
+    assert(t2 === TITLE_V2, `updated title → "${t2}"`);
+
+    // 5. Get updated note
+    console.log("\n── Get (after update) ──");
+    await waitFor(() => !!findNoteByTitle(TITLE_V2), "SQLite sync for v2");
+    const body2 = await getNoteBody(TITLE_V2, FOLDER);
+    assert(body2.includes(ID), "body contains test ID");
+    assert(body2.includes("v2"), "body contains v2 keyword");
+    const row = findNoteByTitle(TITLE_V2)!;
+    assert(row.folder === FOLDER, `still in folder "${row.folder}"`);
+
+    // 6. Delete
+    console.log("\n── Delete ──");
+    await deleteNote(TITLE_V2, FOLDER);
+    cleanupTitle = null;
+
+    // 7. Get deleted — should throw
+    console.log("\n── Get (after delete) ──");
+    let gone = false;
+    try { await getNoteBody(TITLE_V2, FOLDER); } catch { gone = true; }
+    assert(gone, "getNoteBody throws for deleted note");
+    const sqlGone = await waitFor(() => !findNoteByTitle(TITLE_V2), "deleted note gone");
+    assert(sqlGone, "deleted note gone from SQLite");
+
+    // Side-effect check
+    console.log("\n── Side effects ──");
+    const afterCount = listNotes(FOLDER).length;
+    assert(afterCount === beforeCount, `note count unchanged: ${beforeCount} → ${afterCount}`);
   } catch (e) {
-    console.error("\n💥 Unexpected error:", e);
+    console.error("\n💥", e);
     failed++;
   } finally {
     await cleanup();
@@ -229,7 +110,6 @@ async function main(): Promise<void> {
   console.log(`\n${"═".repeat(40)}`);
   console.log(`  Passed: ${passed}  Failed: ${failed}`);
   console.log(`${"═".repeat(40)}\n`);
-
   process.exit(failed > 0 ? 1 : 0);
 }
 

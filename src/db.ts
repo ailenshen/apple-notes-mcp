@@ -27,7 +27,6 @@ export interface NoteRow {
   snippet: string;
   created: string;
   modified: string;
-  has_checklist: boolean;
 }
 
 const LIST_QUERY = `
@@ -40,8 +39,7 @@ SELECT
   n.ZISPINNED      AS is_pinned,
   COALESCE(n.ZSNIPPET, '') AS snippet,
   datetime(n.ZCREATIONDATE3 + 978307200, 'unixepoch') AS created,
-  datetime(n.ZMODIFICATIONDATE1 + 978307200, 'unixepoch') AS modified,
-  n.ZHASCHECKLIST  AS has_checklist
+  datetime(n.ZMODIFICATIONDATE1 + 978307200, 'unixepoch') AS modified
 FROM ZICCLOUDSYNCINGOBJECT n
 LEFT JOIN ZICCLOUDSYNCINGOBJECT f ON n.ZFOLDER = f.Z_PK
 WHERE n.Z_ENT = 12
@@ -72,7 +70,6 @@ export function listNotes(folder?: string, limit?: number): NoteRow[] {
   return rows.map((r) => ({
     ...r,
     is_pinned: Boolean(r.is_pinned),
-    has_checklist: Boolean(r.has_checklist),
   }));
 }
 
@@ -94,7 +91,6 @@ export function searchNotes(query: string, limit?: number): NoteRow[] {
   return rows.map((r) => ({
     ...r,
     is_pinned: Boolean(r.is_pinned),
-    has_checklist: Boolean(r.has_checklist),
   }));
 }
 
@@ -110,8 +106,7 @@ export function findNoteByTitle(title: string, folder?: string): NoteRow | undef
       n.ZISPINNED      AS is_pinned,
       COALESCE(n.ZSNIPPET, '') AS snippet,
       datetime(n.ZCREATIONDATE3 + 978307200, 'unixepoch') AS created,
-      datetime(n.ZMODIFICATIONDATE1 + 978307200, 'unixepoch') AS modified,
-      n.ZHASCHECKLIST  AS has_checklist
+      datetime(n.ZMODIFICATIONDATE1 + 978307200, 'unixepoch') AS modified
     FROM ZICCLOUDSYNCINGOBJECT n
     LEFT JOIN ZICCLOUDSYNCINGOBJECT f ON n.ZFOLDER = f.Z_PK
     WHERE n.Z_ENT = 12
@@ -133,7 +128,6 @@ export function findNoteByTitle(title: string, folder?: string): NoteRow | undef
   return {
     ...row,
     is_pinned: Boolean(row.is_pinned),
-    has_checklist: Boolean(row.has_checklist),
   };
 }
 

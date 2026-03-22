@@ -1,6 +1,6 @@
 # Apple Notes MCP Server
 
-Let Claude read, search, create, and delete your Apple Notes — right from Claude Desktop.
+Let Claude read, search, create, update, and delete your Apple Notes — right from Claude Desktop.
 
 I built this because I want Apple Notes to be my personal data hub, and I need it to work seamlessly with AI. This MCP server is the bridge.
 
@@ -20,8 +20,9 @@ The trade-off: Notes.app will briefly appear during note creation (~3 seconds), 
 
 - **List notes** — browse all your notes or filter by folder
 - **Search notes** — find notes by keyword
-- **Read a note** — get the full content of any note
+- **Read a note** — get the full content of any note (returned as Markdown)
 - **Create a note** — write a new note from Markdown (with native formatting)
+- **Update a note** — replace a note's content while preserving its folder
 - **Delete a note** — move a note to Recently Deleted
 
 ## Setup
@@ -76,6 +77,7 @@ Once configured, just talk to Claude naturally:
 - "Search my notes for 'meeting agenda'"
 - "Read my note titled 'Shopping List'"
 - "Create a note in my Work folder with today's action items"
+- "Update my 'Shopping List' note with these new items"
 - "Delete the note called 'Old Draft'"
 
 ## How It Works
@@ -83,12 +85,14 @@ Once configured, just talk to Claude naturally:
 | Action | Method | Speed |
 |--------|--------|-------|
 | List / Search | SQLite (read-only) | < 100ms |
-| Read | AppleScript | ~1s |
+| Read | AppleScript → Markdown | ~1s |
 | Create | Native Markdown import | ~3-4s |
+| Update | Delete + Create | ~4-5s |
 | Delete | AppleScript | ~1s |
 
-- **Reading** is done through a read-only SQLite connection to the Notes database — fast and safe.
+- **Reading** is done through a read-only SQLite connection to the Notes database — fast and safe. Note content is converted from HTML to Markdown via [turndown](https://github.com/mixmark-io/turndown).
 - **Creating** uses macOS's native Markdown import (`open -a Notes`), so formatting is preserved natively.
+- **Updating** deletes the old note and creates a new one, automatically preserving the original folder.
 - **Deleting** moves notes to Recently Deleted, just like doing it manually.
 
 ## Markdown Support
@@ -106,7 +110,7 @@ When creating notes, most Markdown works natively:
 
 - [x] **Publish to npm** — `npx @ailenshen/apple-notes-mcp` just works, zero setup beyond the config file.
 - [ ] **Remote connection (Streamable HTTP + OAuth 2.1)** — Currently, this server runs locally via stdio. The next goal is to add an HTTP transport with OAuth so that Claude on iPhone/iPad can connect to your Mac's Apple Notes remotely. Your Mac becomes the bridge between mobile Claude and your notes.
-- [ ] **Update note in place** — Currently update = delete + recreate. Explore preserving note identity.
+- [x] **Update note** — delete + recreate with folder preservation.
 
 ## Vision
 

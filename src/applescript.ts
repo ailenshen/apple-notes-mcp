@@ -3,6 +3,14 @@ import { writeFile, unlink } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
 import { randomUUID } from "crypto";
+import TurndownService from "turndown";
+import { findNoteByTitle } from "./db.js";
+
+const turndown = new TurndownService({
+  headingStyle: "atx",
+  bulletListMarker: "-",
+  codeBlockStyle: "fenced",
+});
 
 function runAppleScript(script: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -31,7 +39,8 @@ tell application "Notes"
   return body of item 1 of matchedNotes
 end tell
 `;
-  return runAppleScript(script);
+  const html = await runAppleScript(script);
+  return turndown.turndown(html);
 }
 
 export async function deleteNote(title: string, folder?: string): Promise<void> {
@@ -143,4 +152,21 @@ tell application ${JSON.stringify(frontApp)} to activate
       // ignore
     }
   }
+}
+
+export async function updateNote(
+  title: string,
+  markdown: string,
+  folder?: string
+): Promise<string> {
+  // 1. Find the note's current folder via SQLite
+  const row = findNoteByTitle(title, folder);
+  if (!row) throw new Error(`Note not found: ${title}`);
+  const originalFolder = row.folder || "Notes";
+
+  // 2. Delete the old note
+  await deleteNote(title, folder);
+
+  // 3. Create the new note in the original folder
+  return createNote(markdown, originalFolder);
 }
