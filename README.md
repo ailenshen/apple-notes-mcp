@@ -100,7 +100,7 @@ When creating notes, most Markdown works natively:
 
 ## Roadmap
 
-- [ ] **Publish to npm** — So `npx apple-notes-mcp` just works, zero setup beyond the config file.
+- [x] **Publish to npm** — `npx @ailenshen/apple-notes-mcp` just works, zero setup beyond the config file.
 - [ ] **Remote connection (Streamable HTTP + OAuth 2.1)** — Currently, this server runs locally via stdio. The next goal is to add an HTTP transport with OAuth so that Claude on iPhone/iPad can connect to your Mac's Apple Notes remotely. Your Mac becomes the bridge between mobile Claude and your notes.
 - [ ] **Update note in place** — Currently update = delete + recreate. Explore preserving note identity.
 

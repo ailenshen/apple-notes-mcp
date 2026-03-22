@@ -8,9 +8,34 @@
 
 ---
 
-## 使用方式
+## 开源与发布
 
-### 安装
+- **GitHub**: https://github.com/ailenshen/apple-notes-mcp
+- **npm**: `@ailenshen/apple-notes-mcp`
+- **License**: MIT
+
+### npm 发布流程（自动化）
+
+通过 GitHub Actions 自动发布，无需手动 `npm publish`：
+
+```bash
+# 1. 更新版本号（自动创建 git commit + tag）
+npm version patch   # 1.0.0 → 1.0.1
+npm version minor   # 1.0.0 → 1.1.0
+npm version major   # 1.0.0 → 2.0.0
+
+# 2. 推送代码和 tag，GitHub Actions 自动发布到 npm
+git push && git push --tags
+```
+
+workflow 文件：`.github/workflows/publish.yml`，触发条件为 `v*` tag push。
+npm token 存储在 GitHub repo secret `NPM_TOKEN` 中。
+
+---
+
+## 本地开发
+
+### 安装与构建
 
 ```bash
 cd /Users/elonshen/Documents/Projects/apple-notes-mcp
@@ -18,7 +43,7 @@ npm install
 npm run build
 ```
 
-### 配置 Claude Code
+### 配置 Claude Code（本地开发用）
 
 在 `~/.claude/settings.json` 中添加：
 
@@ -32,10 +57,6 @@ npm run build
   }
 }
 ```
-
-### 配置 Claude Desktop
-
-在 `~/Library/Application Support/Claude/claude_desktop_config.json` 中添加同样的配置。
 
 ### 权限要求
 
