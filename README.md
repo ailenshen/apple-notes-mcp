@@ -31,7 +31,7 @@ The trade-off: Notes.app will briefly appear during note creation (~3 seconds), 
 Open Terminal (Spotlight → type "Terminal" → Enter) and run:
 
 ```bash
-git clone https://github.com/user/apple-notes-mcp.git
+git clone https://github.com/elonshen/apple-notes-mcp.git
 cd apple-notes-mcp
 npm install
 npm run build
