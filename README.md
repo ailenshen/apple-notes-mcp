@@ -4,6 +4,12 @@ Let Claude read, search, create, update, and delete your Apple Notes — right f
 
 I built this because I want Apple Notes to be my personal data hub, and I need it to work seamlessly with AI. This MCP server is the bridge.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="assets/screenshot-light.png">
+  <img alt="Apple Notes MCP" src="assets/screenshot-light.png">
+</picture>
+
 **Requirements:** macOS 26 (Tahoe) or later.
 
 ## Why This One?
