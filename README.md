@@ -26,18 +26,9 @@ The trade-off: Notes.app will briefly appear during note creation (~3 seconds), 
 
 ## Setup
 
-### 1. Install
+### 1. Install Node.js
 
-Open Terminal (Spotlight → type "Terminal" → Enter) and run:
-
-```bash
-git clone https://github.com/elonshen/apple-notes-mcp.git
-cd apple-notes-mcp
-npm install
-npm run build
-```
-
-> You need [Node.js](https://nodejs.org/) 18+ installed. If you don't have it, download the LTS version from the link.
+You need [Node.js](https://nodejs.org/) 18+ installed. If you don't have it, download the LTS version from the link.
 
 ### 2. Configure Claude Desktop
 
@@ -47,18 +38,20 @@ Open the Claude Desktop config file:
 open -e ~/Library/Application\ Support/Claude/claude_desktop_config.json
 ```
 
-If the file doesn't exist, create it. Add the following (replace `/path/to` with the actual path where you cloned the project):
+If the file doesn't exist, create it. Add the following:
 
 ```json
 {
   "mcpServers": {
     "apple-notes": {
-      "command": "node",
-      "args": ["/path/to/apple-notes-mcp/dist/index.js"]
+      "command": "npx",
+      "args": ["-y", "apple-notes-mcp"]
     }
   }
 }
 ```
+
+That's it — no need to clone any code. `npx` will automatically download and run the server.
 
 Save the file, then **restart Claude Desktop**.
 
@@ -107,6 +100,7 @@ When creating notes, most Markdown works natively:
 
 ## Roadmap
 
+- [ ] **Publish to npm** — So `npx apple-notes-mcp` just works, zero setup beyond the config file.
 - [ ] **Remote connection (Streamable HTTP + OAuth 2.1)** — Currently, this server runs locally via stdio. The next goal is to add an HTTP transport with OAuth so that Claude on iPhone/iPad can connect to your Mac's Apple Notes remotely. Your Mac becomes the bridge between mobile Claude and your notes.
 - [ ] **Update note in place** — Currently update = delete + recreate. Explore preserving note identity.
 
