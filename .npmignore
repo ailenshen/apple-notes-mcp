@@ -1,0 +1,7 @@
+src/
+.claude/
+.gitignore
+CLAUDE.md
+tsconfig.json
+dist/test.js
+dist/test.d.ts
