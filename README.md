@@ -57,12 +57,16 @@ Save the file, then **restart Claude Desktop**.
 
 ### 3. Grant Permissions
 
-The first time you create a note, macOS will ask for two permissions. Grant them both to **`node`** (not to Terminal):
+You need to grant two permissions to **`node`** (not to Terminal or Claude Desktop):
 
-1. **Accessibility** — System Settings → Privacy & Security → Accessibility → enable `node`
-2. **Full Disk Access** — System Settings → Privacy & Security → Full Disk Access → enable `node`
+1. **Full Disk Access** — System Settings → Privacy & Security → Full Disk Access → add and enable `node`
+   - **Required for reading notes.** The server reads the Notes database (NoteStore.sqlite) directly, which macOS protects behind Full Disk Access.
+   - Without this permission, list/search/read will fail.
+2. **Accessibility** — System Settings → Privacy & Security → Accessibility → add and enable `node`
+   - Required for creating notes. The server uses System Events to auto-click the Import confirmation dialog.
+   - Without this permission, create will fail.
 
-The `node` binary is typically at `/usr/local/bin/node` or `/opt/homebrew/bin/node`.
+To find your `node` path, run `which node` in Terminal — typically `/usr/local/bin/node` or `/opt/homebrew/bin/node`.
 
 ## Usage Examples
 
