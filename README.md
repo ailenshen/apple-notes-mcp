@@ -1,6 +1,6 @@
 # Apple Notes MCP Server
 
-Let Claude read, search, create, update, and delete your Apple Notes — right from Claude Desktop.
+Bidirectional conversion between Apple Notes native format and Markdown — read notes as Markdown, write Markdown that becomes natively formatted notes.
 
 I built this because I want Apple Notes to be my personal data hub, and I need it to work seamlessly with AI. This MCP server is the bridge.
 
@@ -10,15 +10,16 @@ I built this because I want Apple Notes to be my personal data hub, and I need i
   <img alt="Apple Notes MCP" src="assets/screenshot-light.png">
 </picture>
 
-[![Apple Notes Server MCP server](https://glama.ai/mcp/servers/ailenshen/apple-notes-mcp/badges/card.svg)](https://glama.ai/mcp/servers/ailenshen/apple-notes-mcp)
-
 **Requirements:** macOS 26 (Tahoe) or later.
 
 ## Why This One?
 
 There are other Apple Notes MCP implementations (including Claude's built-in one). Here's what makes this one different:
 
-**Native formatting support.** When you create a note, it goes through macOS's native Markdown import — so titles become real Titles, headings become real Headings, bold/italic/lists all render as native Apple Notes formatting, not plain text pasted into a note body.
+**Bidirectional native format ↔ Markdown conversion.** Other implementations lose formatting — they read plain text or write plain text into note bodies. This one preserves it in both directions:
+
+- **Reading:** Apple Notes HTML → Markdown via [turndown](https://github.com/mixmark-io/turndown). Headings, bold, italic, lists, code — all faithfully converted.
+- **Writing:** Markdown → native Apple Notes formatting via macOS's built-in Markdown import. Titles become real Titles, headings become real Headings, not plain text.
 
 The trade-off: Notes.app will briefly appear during note creation (~3 seconds), because we use `open -a Notes` to trigger the native import pipeline. It's the only way to get true native formatting without reverse-engineering Apple's private internal format.
 
@@ -144,3 +145,5 @@ This project makes Apple Notes a first-class data source for AI. The long-term g
 ## License
 
 MIT
+
+[![Apple Notes Server MCP server](https://glama.ai/mcp/servers/ailenshen/apple-notes-mcp/badges/card.svg)](https://glama.ai/mcp/servers/ailenshen/apple-notes-mcp)
