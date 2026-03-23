@@ -79,10 +79,7 @@ npm test
 ## 架构总览
 
 ```
-Claude Code / Claude Desktop（本地 stdio）
-    │
-    ▼
-MCP Server（stdio transport）
+MCP Server（双模式：stdio / Streamable HTTP）
     │
     ├─ 读 ── SQLite 直连（列表/搜索）
     │         + AppleScript（单篇正文 HTML → turndown 转 Markdown）
@@ -98,7 +95,7 @@ MCP Server（stdio transport）
 
 ```
 src/
-├── index.ts          # MCP server 入口，注册 6 个工具，stdio transport
+├── index.ts          # MCP server 入口，注册 6 个工具，支持 stdio 和 HTTP 双模式
 ├── db.ts             # SQLite 直连 NoteStore.sqlite（readonly），list/search/find 查询
 ├── applescript.ts    # AppleScript 封装：读正文（HTML→Markdown）、创建、更新、删除
 └── test.ts           # 集成测试：create → list → get → update → get → delete → get
@@ -106,20 +103,22 @@ src/
 
 ---
 
-## 传输层决策
+## 传输层
 
-### 第一阶段：stdio（本地直连）
+支持两种模式，默认 stdio：
 
-MCP server 通过 stdio transport 运行，Claude Code 或 Claude Desktop 直接以子进程方式启动。
+### stdio（本地直连）
 
-优势：
-- **零认证**：不需要 OAuth、不需要网络，进程间直接通信
-- **最快上线**：省掉 Express、auth 整套代码，只需实现 MCP 工具逻辑
-- **调试简单**：本地进程，日志直接看
+Claude Code 或 Claude Desktop 以子进程方式启动，进程间直接通信，零认证。
 
-### 第二阶段（未来）：Streamable HTTP + OAuth 2.1
+### Streamable HTTP（远程）
 
-如果需要远程接入 Claude Web，再加 Express + OAuth 层。当前不实现。
+`--http` 启动 Express + `StreamableHTTPServerTransport`，Stateful session 管理。
+
+- 端点路径含随机密钥（`/mcp/<secret>`），替代 OAuth 认证
+- 每个 session 独立的 McpServer + Transport 实例
+- 支持 `--port` 和 `--secret` 参数
+- Express 动态 import，stdio 模式不加载
 
 ---
 
@@ -187,9 +186,9 @@ AppleScript 遍历 900+ 篇笔记超 30 秒超时。SQLite 直连 `NoteStore.sql
 2. AppleScript 删除原笔记
 3. `open -a Notes` 导入新版本（走完整 create 流程，移动到原文件夹）
 
-### 6. 传输层 — 先 stdio，后 HTTP
+### 6. 传输层 — 双模式
 
-先用 stdio 本地直连跑通全部功能，远程接入作为未来扩展。省掉 Express + OAuth 整套代码。
+默认 stdio 本地直连，`--http` 切换为 Streamable HTTP 远程模式。URL 路径中的随机密钥替代 OAuth，简单有效。
 
 ---
 

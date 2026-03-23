@@ -33,19 +33,18 @@ The trade-off: Notes.app will briefly appear during note creation (~3 seconds), 
 
 ## Setup
 
-### 1. Install Node.js
+### Prerequisites
 
-You need [Node.js](https://nodejs.org/) 18+ installed. If you don't have it, download the LTS version from the link.
+- [Node.js](https://nodejs.org/) 18+
+- macOS permissions for **`node`** (not Terminal or Claude Desktop):
+  1. **Full Disk Access** — System Settings → Privacy & Security → Full Disk Access → add `node`
+  2. **Accessibility** — System Settings → Privacy & Security → Accessibility → add `node`
 
-### 2. Configure Claude Desktop
+To find your `node` path: `which node` (typically `/usr/local/bin/node` or `/opt/homebrew/bin/node`).
 
-Open the Claude Desktop config file:
+### Option A: Local (stdio)
 
-```bash
-open -e ~/Library/Application\ Support/Claude/claude_desktop_config.json
-```
-
-If the file doesn't exist, create it. Add the following:
+For Claude Desktop or Claude Code on the same Mac. Add to your MCP client config:
 
 ```json
 {
@@ -58,22 +57,38 @@ If the file doesn't exist, create it. Add the following:
 }
 ```
 
-That's it — no need to clone any code. `npx` will automatically download and run the server.
+For Claude Desktop, the config file is at `~/Library/Application Support/Claude/claude_desktop_config.json`.
 
-Save the file, then **restart Claude Desktop**.
+### Option B: Remote (HTTP)
 
-### 3. Grant Permissions
+For accessing your Apple Notes from anywhere — Claude on your phone, another computer, or any MCP client that supports HTTP.
 
-You need to grant two permissions to **`node`** (not to Terminal or Claude Desktop):
+Start the server in HTTP mode on your Mac:
 
-1. **Full Disk Access** — System Settings → Privacy & Security → Full Disk Access → add and enable `node`
-   - **Required for reading notes.** The server reads the Notes database (NoteStore.sqlite) directly, which macOS protects behind Full Disk Access.
-   - Without this permission, list/search/read will fail.
-2. **Accessibility** — System Settings → Privacy & Security → Accessibility → add and enable `node`
-   - Required for creating notes. The server uses System Events to auto-click the Import confirmation dialog.
-   - Without this permission, create will fail.
+```bash
+npx @ailenshen/apple-notes-mcp@latest --http
+```
 
-To find your `node` path, run `which node` in Terminal — typically `/usr/local/bin/node` or `/opt/homebrew/bin/node`.
+This will print an endpoint URL with a random secret path:
+
+```
+Apple Notes MCP server running on HTTP
+Endpoint: http://localhost:3100/mcp/a3f8b2c9e1d4...
+```
+
+The secret in the URL is the only authentication — anyone with the full URL can access your notes.
+
+**Making it accessible remotely:** The HTTP server listens on `0.0.0.0:3100` by default. To access it over the internet, put it behind HTTPS using any reverse proxy or tunnel you prefer (ngrok, Cloudflare Tunnel, a VPS with nginx, etc.), then point your remote MCP client to the HTTPS URL.
+
+**CLI options:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--http` | off | Enable HTTP mode (default is stdio) |
+| `--port <number>` | 3100 | HTTP port |
+| `--secret <string>` | random | Custom URL secret (auto-generated if omitted) |
+
+**Running as a persistent service on macOS:** To keep the server running across reboots with a fixed secret, create a LaunchAgent. See the [wiki](https://github.com/ailenshen/apple-notes-mcp/wiki) for an example plist.
 
 ## Usage Examples
 
@@ -115,7 +130,7 @@ When creating notes, most Markdown works natively:
 ## Roadmap
 
 - [x] **Publish to npm** — `npx @ailenshen/apple-notes-mcp` just works, zero setup beyond the config file.
-- [ ] **Remote connection (Streamable HTTP + OAuth 2.1)** — Currently, this server runs locally via stdio. The next goal is to add an HTTP transport with OAuth so that Claude on iPhone/iPad can connect to your Mac's Apple Notes remotely. Your Mac becomes the bridge between mobile Claude and your notes.
+- [x] **Remote connection (Streamable HTTP)** — Access your Apple Notes from anywhere via HTTP. Your Mac becomes the bridge between any remote MCP client and your notes.
 - [x] **Update note** — delete + recreate with folder preservation.
 
 ## Vision
