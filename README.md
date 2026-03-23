@@ -10,6 +10,8 @@ I built this because I want Apple Notes to be my personal data hub, and I need i
   <img alt="Apple Notes MCP" src="assets/screenshot-light.png">
 </picture>
 
+[![Apple Notes Server MCP server](https://glama.ai/mcp/servers/ailenshen/apple-notes-mcp/badges/card.svg)](https://glama.ai/mcp/servers/ailenshen/apple-notes-mcp)
+
 **Requirements:** macOS 26 (Tahoe) or later.
 
 ## Why This One?
