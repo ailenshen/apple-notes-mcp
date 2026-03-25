@@ -22,10 +22,13 @@
     "express": "^5.2.1",
     "turndown": "^7.2.2"
   },
+  "engines": {
+    "node": ">=24"
+  },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/express": "^5.0.6",
-    "@types/node": "^22.15.3",
+    "@types/node": "^24.0.0",
     "@types/turndown": "^5.0.6",
     "typescript": "^5.8.3"
   }

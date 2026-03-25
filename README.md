@@ -38,7 +38,7 @@ The trade-off: Notes.app will briefly appear during note creation (~3 seconds), 
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) 18+
+- [Node.js](https://nodejs.org/) 24+ (LTS)
 - macOS permissions for **`node`** (not Terminal or Claude Desktop):
   1. **Full Disk Access** — System Settings → Privacy & Security → Full Disk Access → add `node`
   2. **Accessibility** — System Settings → Privacy & Security → Accessibility → add `node`
