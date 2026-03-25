@@ -7,6 +7,7 @@ import { z } from "zod";
 import { randomUUID, randomBytes } from "node:crypto";
 import { listNotes, searchNotes, listFolders, findNoteByTitle } from "./db.js";
 import { getNoteBody, createNote, deleteNote, updateNote } from "./applescript.js";
+import { friendlyError } from "./permissions.js";
 
 // --- Tool registration ---
 
@@ -32,7 +33,7 @@ function createServer(): McpServer {
         };
       } catch (e: unknown) {
         return {
-          content: [{ type: "text", text: `Error: ${(e as Error).message}` }],
+          content: [{ type: "text", text: friendlyError(e) }],
           isError: true,
         };
       }
@@ -55,7 +56,7 @@ function createServer(): McpServer {
         };
       } catch (e: unknown) {
         return {
-          content: [{ type: "text", text: `Error: ${(e as Error).message}` }],
+          content: [{ type: "text", text: friendlyError(e) }],
           isError: true,
         };
       }
@@ -78,7 +79,7 @@ function createServer(): McpServer {
         };
       } catch (e: unknown) {
         return {
-          content: [{ type: "text", text: `Error: ${(e as Error).message}` }],
+          content: [{ type: "text", text: friendlyError(e) }],
           isError: true,
         };
       }
@@ -101,7 +102,7 @@ function createServer(): McpServer {
         };
       } catch (e: unknown) {
         return {
-          content: [{ type: "text", text: `Error: ${(e as Error).message}` }],
+          content: [{ type: "text", text: friendlyError(e) }],
           isError: true,
         };
       }
@@ -125,7 +126,7 @@ function createServer(): McpServer {
         };
       } catch (e: unknown) {
         return {
-          content: [{ type: "text", text: `Error: ${(e as Error).message}` }],
+          content: [{ type: "text", text: friendlyError(e) }],
           isError: true,
         };
       }
@@ -148,7 +149,7 @@ function createServer(): McpServer {
         };
       } catch (e: unknown) {
         return {
-          content: [{ type: "text", text: `Error: ${(e as Error).message}` }],
+          content: [{ type: "text", text: friendlyError(e) }],
           isError: true,
         };
       }
