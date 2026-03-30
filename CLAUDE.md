@@ -212,3 +212,33 @@ AppleScript 遍历 900+ 篇笔记超 30 秒超时。SQLite 直连 `NoteStore.sql
 | create_note | .md → open → 确认 → 移动 → 选中 → 切回 | ~3-4s |
 | delete_note | AppleScript | ~1s |
 | update_note（逻辑） | delete + create | ~4-5s |
+
+---
+
+## 已知限制与待追踪问题
+
+### 已知限制
+
+#### 1. 不支持笔记内容的部分编辑（patch/edit 模式）
+
+`getNoteBody` 读取笔记内容的路径是：AppleScript 取 HTML → turndown 转 Markdown。这个 round-trip 是有损的：
+
+- 下划线被转义（`MCP_Test` → `MCP\_Test`）
+- 开头出现 `**` 等 Notes HTML 产物
+- 内容结构与原始写入的 Markdown 不一致
+
+导致"读取 → 修改片段 → 重新导入"的 round-trip 不可靠，无法安全实现 patch/edit 模式。
+
+#### 2. 笔记创建时 Notes 应用短暂弹窗
+
+导入流程依赖 System Events 自动点击 Import 确认弹窗，Notes 有时会短暂抢占焦点。
+
+### 待解锁的改进
+
+| 待追踪事项 | 解锁的能力 |
+|-----------|-----------|
+| AppleScript 新增 markdown 导出命令（导出干净 markdown 而非 HTML） | 可靠的 round-trip → 支持 patch/edit 部分编辑 |
+| AppleScript 新增 markdown 导入命令（无需 UI 弹窗确认） | 无焦点抢占的静默写入 |
+| Apple 开放 Notes 官方 API | 以上所有能力 + 更稳定的内容读写 |
+
+追踪方式：关注每年 WWDC 和 macOS release notes。

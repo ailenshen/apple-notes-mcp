@@ -119,6 +119,13 @@ To keep it running across reboots, see the [wiki](https://github.com/ailenshen/a
 - **Updating** deletes the old note and creates a new one, automatically preserving the original folder.
 - **Deleting** moves notes to Recently Deleted, same as doing it by hand.
 
+## Known Limitations
+
+- **Partial note editing** (e.g. "fix just this paragraph") is not supported. `update_note` always replaces the full content. This is a fundamental limitation of how Notes exposes content — its AppleScript interface returns HTML, not the original Markdown, so a clean read→edit→write round-trip isn't possible today.
+- **Notes briefly appears** during note creation. The Markdown import flow requires auto-confirming a dialog in Notes.app, which may momentarily bring it to the foreground.
+
+These limitations would be lifted if Apple adds Markdown import/export to AppleScript, or opens an official Notes API — both are tracked for future macOS releases.
+
 ## Vision
 
 Apple Notes is the most natural place to keep personal knowledge on Apple devices — it syncs everywhere, it's fast, and it's private. But it's a walled garden with no API.
