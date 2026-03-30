@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import { homedir } from "os";
 import { join } from "path";
 
@@ -7,12 +7,12 @@ const DB_PATH = join(
   "Library/Group Containers/group.com.apple.notes/NoteStore.sqlite"
 );
 
-let db: Database.Database | null = null;
+let db: DatabaseSync | null = null;
 
-function getDb(): Database.Database {
+function getDb(): DatabaseSync {
   if (!db) {
-    db = new Database(DB_PATH, { readonly: true });
-    db.pragma("journal_mode = WAL");
+    db = new DatabaseSync(DB_PATH, { readOnly: true });
+    db.exec("PRAGMA journal_mode = WAL");
   }
   return db;
 }
@@ -51,7 +51,7 @@ ORDER BY n.ZMODIFICATIONDATE1 DESC
 export function listNotes(folder?: string, limit?: number): NoteRow[] {
   const db = getDb();
   let sql = LIST_QUERY;
-  const params: unknown[] = [];
+  const params: (string | number)[] = [];
 
   if (folder) {
     sql = sql.replace(
@@ -66,7 +66,7 @@ export function listNotes(folder?: string, limit?: number): NoteRow[] {
     params.push(limit);
   }
 
-  const rows = db.prepare(sql).all(...params) as NoteRow[];
+  const rows = db.prepare(sql).all(...params) as unknown as NoteRow[];
   return rows.map((r) => ({
     ...r,
     is_pinned: Boolean(r.is_pinned),
@@ -80,14 +80,14 @@ export function searchNotes(query: string, limit?: number): NoteRow[] {
     "ORDER BY",
     `AND (n.ZTITLE1 LIKE ? OR n.ZSNIPPET LIKE ?) ORDER BY`
   );
-  const params: unknown[] = [likePattern, likePattern];
+  const params: (string | number)[] = [likePattern, likePattern];
 
   if (limit) {
     sql += ` LIMIT ?`;
     params.push(limit);
   }
 
-  const rows = db.prepare(sql).all(...params) as NoteRow[];
+  const rows = db.prepare(sql).all(...params) as unknown as NoteRow[];
   return rows.map((r) => ({
     ...r,
     is_pinned: Boolean(r.is_pinned),
@@ -114,7 +114,7 @@ export function findNoteByTitle(title: string, folder?: string): NoteRow | undef
       AND COALESCE(f.ZTITLE2, '') != 'Recently Deleted'
       AND n.ZTITLE1 = ?
   `;
-  const params: unknown[] = [title];
+  const params: (string | number)[] = [title];
 
   if (folder) {
     sql += ` AND f.ZTITLE2 = ?`;
@@ -123,7 +123,7 @@ export function findNoteByTitle(title: string, folder?: string): NoteRow | undef
 
   sql += ` ORDER BY n.ZMODIFICATIONDATE1 DESC LIMIT 1`;
 
-  const row = db.prepare(sql).get(...params) as NoteRow | undefined;
+  const row = db.prepare(sql).get(...params) as unknown as NoteRow | undefined;
   if (!row) return undefined;
   return {
     ...row,
@@ -143,6 +143,6 @@ export function listFolders(): { name: string; id: number; parent: string }[] {
          AND f.ZTITLE2 != 'Recently Deleted'
        ORDER BY f.ZTITLE2`
     )
-    .all() as { name: string; id: number; parent: string }[];
+    .all() as unknown as { name: string; id: number; parent: string }[];
   return rows;
 }

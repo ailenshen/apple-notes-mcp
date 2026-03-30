@@ -1,5 +1,11 @@
 #!/usr/bin/env node
 
+// Suppress Node.js ExperimentalWarning (e.g. node:sqlite) from polluting MCP stdio output
+process.removeAllListeners("warning");
+process.on("warning", (w) => {
+  if (w.name !== "ExperimentalWarning") process.stderr.write(`Warning: ${w.message}\n`);
+});
+
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
