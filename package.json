@@ -14,7 +14,9 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "tsc && node dist/test.js"
+    "test": "tsc && node --test --test-isolation=none --test-reporter=spec --test-reporter-destination=stderr dist/*.test.js && node dist/test.js",
+    "test:unit": "tsc && node --test --test-isolation=none --test-reporter=spec --test-reporter-destination=stderr dist/*.test.js",
+    "test:e2e": "tsc && node dist/test.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",

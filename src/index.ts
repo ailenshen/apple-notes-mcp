@@ -13,7 +13,7 @@ import { z } from "zod";
 import { randomUUID, randomBytes } from "node:crypto";
 import { listNotes, searchNotes, listFolders, findNoteByTitle } from "./db.js";
 import { getNoteBody, createNote, deleteNote, updateNote } from "./applescript.js";
-import { friendlyError } from "./permissions.js";
+import { friendlyError, logError } from "./permissions.js";
 
 // --- Tool registration ---
 
@@ -38,6 +38,7 @@ function createServer(): McpServer {
           content: [{ type: "text", text: JSON.stringify(notes, null, 2) }],
         };
       } catch (e: unknown) {
+        logError("list_notes", e);
         return {
           content: [{ type: "text", text: friendlyError(e) }],
           isError: true,
@@ -61,6 +62,7 @@ function createServer(): McpServer {
           content: [{ type: "text", text: JSON.stringify(notes, null, 2) }],
         };
       } catch (e: unknown) {
+        logError("search_notes", e);
         return {
           content: [{ type: "text", text: friendlyError(e) }],
           isError: true,
@@ -84,6 +86,7 @@ function createServer(): McpServer {
           content: [{ type: "text", text: body }],
         };
       } catch (e: unknown) {
+        logError("get_note", e);
         return {
           content: [{ type: "text", text: friendlyError(e) }],
           isError: true,
@@ -107,6 +110,7 @@ function createServer(): McpServer {
           content: [{ type: "text", text: `Note "${title}" created successfully${folder ? ` in folder "${folder}"` : ""}.` }],
         };
       } catch (e: unknown) {
+        logError("create_note", e);
         return {
           content: [{ type: "text", text: friendlyError(e) }],
           isError: true,
@@ -131,6 +135,7 @@ function createServer(): McpServer {
           content: [{ type: "text", text: `Note "${title}" updated successfully (new title: "${newTitle}").` }],
         };
       } catch (e: unknown) {
+        logError("update_note", e);
         return {
           content: [{ type: "text", text: friendlyError(e) }],
           isError: true,
@@ -154,6 +159,7 @@ function createServer(): McpServer {
           content: [{ type: "text", text: `Note "${title}" deleted successfully.` }],
         };
       } catch (e: unknown) {
+        logError("delete_note", e);
         return {
           content: [{ type: "text", text: friendlyError(e) }],
           isError: true,
