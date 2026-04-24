@@ -119,16 +119,23 @@ return "no_sheet"
     const postImportScript = `
 tell application "Notes"
   try
-    set importedFolder to folder "Imported Notes"
-    set matchedNotes to (every note of importedFolder whose name is ${JSON.stringify(title)})
-    if (count of matchedNotes) > 0 then
-      set targetNote to item 1 of matchedNotes
+    set targetNote to missing value
+    set importedFolder to missing value
+    repeat with f in every folder
+      if name of f starts with "Imported Notes" then
+        set matches to (every note of f whose name is ${JSON.stringify(title)})
+        if (count of matches) > 0 then
+          set targetNote to item 1 of matches
+          set importedFolder to f
+          exit repeat
+        end if
+      end if
+    end repeat
+    if targetNote is not missing value then
       move targetNote to folder ${JSON.stringify(finalFolder)}
-      -- Select the note in Notes UI
       show targetNote
     end if
-    -- Clean up empty Imported Notes folder
-    if (count of notes of importedFolder) = 0 then
+    if importedFolder is not missing value then
       delete importedFolder
     end if
   end try
@@ -143,6 +150,29 @@ tell application ${JSON.stringify(frontApp)} to activate
       // best-effort: Imported Notes folder may not exist
     }
 
+    // Notes sometimes creates empty "Imported Notes*" folders asynchronously after
+    // the import is confirmed. Collect names first, then delete by name to avoid
+    // stale object references.
+    setTimeout(() => {
+      runAppleScript(`
+tell application "Notes"
+  try
+    set emptyNames to {}
+    repeat with f in every folder
+      if name of f starts with "Imported Notes" and (count of notes of f) = 0 then
+        set end of emptyNames to name of f
+      end if
+    end repeat
+    repeat with n in emptyNames
+      try
+        delete folder n
+      end try
+    end repeat
+  end try
+end tell
+`).catch(() => {});
+    }, 3000);
+
     return title;
   } finally {
     // 6. Delete temp file
@@ -154,19 +184,31 @@ tell application ${JSON.stringify(frontApp)} to activate
   }
 }
 
+export async function permanentlyDeleteNote(title: string): Promise<void> {
+  const script = `
+tell application "Notes"
+  try
+    set targets to (every note of folder "Recently Deleted" whose name is ${JSON.stringify(title)})
+    if (count of targets) > 0 then
+      delete item 1 of targets
+    end if
+  end try
+end tell
+`;
+  await runAppleScript(script);
+}
+
 export async function updateNote(
   title: string,
   markdown: string,
   folder?: string
 ): Promise<string> {
-  // 1. Find the note's current folder via SQLite
   const row = findNoteByTitle(title, folder);
   if (!row) throw new Error(`Note not found: ${title}`);
   const originalFolder = row.folder || "Notes";
 
-  // 2. Delete the old note
   await deleteNote(title, folder);
+  await permanentlyDeleteNote(title);
 
-  // 3. Create the new note in the original folder
   return createNote(markdown, originalFolder);
 }
