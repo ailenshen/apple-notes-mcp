@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.dist-test/
 package-lock.json
 *.tgz
 .DS_Store
