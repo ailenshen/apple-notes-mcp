@@ -62,7 +62,8 @@ end tell
 
 export async function createNote(
   markdown: string,
-  targetFolder?: string
+  targetFolder?: string,
+  restoreApp?: string
 ): Promise<string> {
   // 1. Extract title from first line
   const firstLine = markdown.split("\n")[0].replace(/^#\s*/, "").trim();
@@ -73,11 +74,13 @@ export async function createNote(
   await writeFile(tmpPath, markdown, "utf-8");
 
   try {
-    // 3. Remember current frontmost app, open file, auto-confirm Import sheet
+    // 3. Remember current frontmost app (or use caller-supplied value), open file, auto-confirm Import sheet
+    const captureFrontApp = restoreApp
+      ? `set frontApp to ${JSON.stringify(restoreApp)}`
+      : `set frontApp to name of first process whose frontmost is true`;
     const importScript = `
--- Remember which app is currently active
 tell application "System Events"
-  set frontApp to name of first process whose frontmost is true
+  ${captureFrontApp}
 end tell
 
 do shell script "open -g -a Notes " & quoted form of "${tmpPath}"
@@ -203,6 +206,11 @@ export async function updateNote(
   markdown: string,
   folder?: string
 ): Promise<string> {
+  // Capture front app before deleteNote activates Notes
+  const frontApp = await runAppleScript(
+    `tell application "System Events" to return name of first process whose frontmost is true`
+  );
+
   const row = findNoteByTitle(title, folder);
   if (!row) throw new Error(`Note not found: ${title}`);
   const originalFolder = row.folder || "Notes";
@@ -210,5 +218,5 @@ export async function updateNote(
   await deleteNote(title, folder);
   await permanentlyDeleteNote(title);
 
-  return createNote(markdown, originalFolder);
+  return createNote(markdown, originalFolder, frontApp);
 }
