@@ -143,14 +143,21 @@ tell application "Notes"
     end if
   end try
 end tell
-
--- Restore the original frontmost app
-tell application ${JSON.stringify(frontApp)} to activate
 `;
     try {
       await runAppleScript(postImportScript);
     } catch {
       // best-effort: Imported Notes folder may not exist
+    }
+
+    // Restore focus after Notes finishes its internal processing.
+    // Splitting activate into a separate call avoids Notes re-stealing focus
+    // after show/move operations complete asynchronously.
+    await new Promise((r) => setTimeout(r, 500));
+    try {
+      await runAppleScript(`tell application ${JSON.stringify(frontApp)} to activate`);
+    } catch {
+      // best-effort
     }
 
     // Notes sometimes creates empty "Imported Notes*" folders asynchronously after
