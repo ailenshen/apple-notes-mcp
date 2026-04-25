@@ -14,6 +14,12 @@
 - **npm**: `@ailenshen/apple-notes-mcp`
 - **License**: MIT
 
+> **Contribution language**: All git commit messages, PR titles, PR descriptions, and GitHub issue content must be written in **English**.
+
+> **Writing style**: Keep descriptions plain and easy to understand — explain what changed and why in everyday language, not technical jargon. Prefer short sentences over complex ones.
+
+> **Issue actions require confirmation**: Any action on GitHub issues — replying, closing, reopening, labeling, etc. — must be explicitly confirmed by the user before execution.
+
 ### npm 发布流程（自动化）
 
 通过 GitHub Actions 自动发布，无需手动 `npm publish`：
