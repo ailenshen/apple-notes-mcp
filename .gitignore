@@ -5,3 +5,4 @@ package-lock.json
 *.tgz
 .DS_Store
 .claude/
+CLAUDE.md
