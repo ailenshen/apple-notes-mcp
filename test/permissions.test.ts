@@ -67,11 +67,35 @@ test("friendlyError: includes FDA hint for FDA error", async () => {
   assert.match(result, /Full Disk Access/);
 });
 
-test("friendlyError: returns generic message and hides raw error text", async () => {
+test("friendlyError: returns first line of error message for unmatched errors", async () => {
   const { result, stdout } = await captureStdout(() =>
     friendlyError(new Error("Note not found: whatever"))
   );
   assert.equal(stdout.length, 0);
-  assert.equal(result, "The operation failed. See the MCP server log for details.");
-  assert.doesNotMatch(result, /Note not found/);
+  assert.equal(result, "Note not found: whatever");
+});
+
+test("friendlyError: strips multi-line content (no stack traces) for unmatched errors", async () => {
+  const err = new Error("Can't get folder \"Foo\". (-1728)\n  at fakeFrame\n  at otherFrame");
+  const { result } = await captureStdout(() => friendlyError(err));
+  assert.equal(result, "Can't get folder \"Foo\". (-1728)");
+});
+
+test("friendlyError: classifies Automation (-1743) denial", async () => {
+  const err = new Error(
+    "AppleScript error: Not authorized to send Apple events to Notes. (-1743)"
+  );
+  const { result } = await captureStdout(() => friendlyError(err));
+  assert.match(result, /Automation/);
+});
+
+test("friendlyError: classifies osascript timeout via signal", async () => {
+  const err = new Error("AppleScript error: timed out after 30s") as Error & {
+    signal?: string;
+    killed?: boolean;
+  };
+  err.signal = "SIGTERM";
+  err.killed = true;
+  const { result } = await captureStdout(() => friendlyError(err));
+  assert.match(result, /timed out/i);
 });

@@ -7,7 +7,7 @@
  * it in the comment above the matcher.
  */
 
-type MaybeNodeError = Error & { code?: string; errcode?: number };
+type MaybeNodeError = Error & { code?: string | number; errcode?: number; signal?: string; killed?: boolean };
 
 function toError(error: unknown): MaybeNodeError | null {
   return error instanceof Error ? (error as MaybeNodeError) : null;
@@ -57,6 +57,35 @@ function isAccessibilityError(error: unknown): boolean {
   );
 }
 
+/**
+ * Match "Automation permission missing" — node is not authorized to send Apple
+ * events to the Notes app (separate TCC bucket from Accessibility).
+ *
+ * Observed stderr from osascript when this is denied:
+ *   "Not authorized to send Apple events to Notes. (-1743)"
+ */
+function isAutomationError(error: unknown): boolean {
+  const e = toError(error);
+  if (!e) return false;
+  const msg = e.message.toLowerCase();
+  return (
+    msg.includes("not authorized to send apple events") ||
+    msg.includes("(-1743)")
+  );
+}
+
+/**
+ * Match "osascript timed out" — runAppleScript kills the process after 30s and
+ * surfaces it as `signal: "SIGTERM"` + `killed: true`, with a "timed out" hint
+ * baked into the wrapped message.
+ */
+function isTimeoutError(error: unknown): boolean {
+  const e = toError(error);
+  if (!e) return false;
+  if (e.killed && e.signal === "SIGTERM") return true;
+  return e.message.toLowerCase().includes("timed out");
+}
+
 const FULL_DISK_ACCESS_HINT = [
   `Missing "Full Disk Access" permission.`,
   ``,
@@ -71,6 +100,15 @@ const ACCESSIBILITY_HINT = [
   `Then restart your MCP client (Claude Desktop, Claude Code, etc.).`,
 ].join("\n");
 
+const AUTOMATION_HINT = [
+  `Missing "Automation" permission for Notes.`,
+  ``,
+  `Go to System Settings > Privacy & Security > Automation, find "node" (or your MCP client), expand it, and enable "Notes".`,
+  `Then restart your MCP client (Claude Desktop, Claude Code, etc.).`,
+].join("\n");
+
+const TIMEOUT_HINT = `AppleScript timed out after 30s. The Notes app may be unresponsive — try again, and if it persists quit and reopen Notes.`;
+
 /**
  * Return a user-friendly permission hint if the error matches a known
  * permission failure; otherwise undefined.
@@ -78,18 +116,23 @@ const ACCESSIBILITY_HINT = [
 export function getPermissionHint(error: unknown): string | undefined {
   if (isFullDiskAccessError(error)) return FULL_DISK_ACCESS_HINT;
   if (isAccessibilityError(error)) return ACCESSIBILITY_HINT;
+  if (isAutomationError(error)) return AUTOMATION_HINT;
+  if (isTimeoutError(error)) return TIMEOUT_HINT;
   return undefined;
 }
 
 /**
  * Build the user-facing message for a failed tool call.
- * Permission errors return an actionable hint; everything else returns a stable
- * generic message — raw exception text is kept out of the MCP response so it
- * doesn't leak to the model. Use logError() to record the original error on stderr.
+ * Permission/timeout errors return an actionable hint; otherwise we return the
+ * raw error.message (single line, no stack) so the LLM has a concrete cause to
+ * reason about. Stack traces are written to stderr via logError() and never
+ * included here — they bloat the MCP response and burn tokens.
  */
 export function friendlyError(error: unknown): string {
   const hint = getPermissionHint(error);
   if (hint) return hint;
+  const e = toError(error);
+  if (e && e.message) return e.message.split("\n")[0].trim();
   return "The operation failed. See the MCP server log for details.";
 }
 

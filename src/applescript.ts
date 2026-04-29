@@ -12,11 +12,42 @@ const turndown = new TurndownService({
   codeBlockStyle: "fenced",
 });
 
+function extractAppleScriptError(stderr: string): string {
+  // osascript stderr lines look like "<line>:<col>: execution error: <msg> (<code>)".
+  // Pick the last execution-error line — it carries the actual cause without the script body.
+  const lines = stderr.split("\n").map((l) => l.trim()).filter(Boolean);
+  const execLine = [...lines].reverse().find((l) => /execution error:/i.test(l));
+  if (execLine) return execLine.replace(/^\d+:\d+:\s*/, "");
+  return lines[lines.length - 1] ?? "";
+}
+
+interface ExecError extends Error {
+  code?: number | string;
+  signal?: string;
+  killed?: boolean;
+}
+
 function runAppleScript(script: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile("osascript", ["-e", script], { timeout: 30000 }, (err, stdout, stderr) => {
-      if (err) {
-        reject(new Error(`AppleScript error: ${err.message}\n${stderr}`));
+    execFile("osascript", ["-e", script], { timeout: 30000 }, (rawErr, stdout, stderr) => {
+      if (rawErr) {
+        const err = rawErr as ExecError;
+        const detail = extractAppleScriptError(stderr);
+        // Build a compact, single-line cause. When stderr is empty (TCC sometimes denies silently),
+        // surface exit code / signal so the caller still has a fingerprint to act on.
+        const parts: string[] = [];
+        if (detail) parts.push(detail);
+        if (err.killed && err.signal === "SIGTERM") parts.push("timed out after 30s");
+        if (!detail) {
+          if (err.code !== undefined) parts.push(`exit code ${err.code}`);
+          if (err.signal) parts.push(`signal ${err.signal}`);
+          if (parts.length === 0) parts.push("no stderr output");
+        }
+        const wrapped = new Error(`AppleScript error: ${parts.join("; ")}`) as ExecError;
+        wrapped.code = err.code;
+        wrapped.signal = err.signal;
+        wrapped.killed = err.killed;
+        reject(wrapped);
       } else {
         resolve(stdout.trim());
       }
