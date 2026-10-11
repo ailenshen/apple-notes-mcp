@@ -26,3 +26,16 @@ public enum NotesError: Error, Sendable, Equatable, CustomStringConvertible {
         }
     }
 }
+
+/// Upload state of one note: local edits are on iCloud once `synced` catches up with `local`.
+public struct CloudState: Sendable, Equatable {
+    public var local: Int
+    public var synced: Int
+    public var isSynced: Bool { synced >= local }
+}
+
+/// AppleScript ids (x-coredata URIs) of a note and its folder, used to nudge the upload.
+struct SyncTarget: Sendable {
+    var noteURI: String
+    var folderURI: String
+}
