@@ -4,9 +4,25 @@ import Foundation
 public struct NoteSnapshot: Sendable, Equatable {
     public var id: String
     public var title: String
+    /// Folder title only; see `folderPath` for the full path.
     public var folder: String
+    public var folderID: String
+    public var folderPath: String
     public var modified: Date
+    public var created: Date
+    public var isPinned: Bool
+    public var isLocked: Bool
+    public var isShared: Bool
+    public var isInTrash: Bool
     public var text: String
+}
+
+/// A user folder (no trash, no smart folders). `path` is "Parent/Child", prefixed with the
+/// account name when there is more than one account.
+public struct FolderSnapshot: Sendable, Equatable {
+    public var id: String
+    public var path: String
+    public var noteCount: Int
 }
 
 public enum NotesError: Error, Sendable, Equatable, CustomStringConvertible {

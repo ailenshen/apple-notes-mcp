@@ -5,7 +5,7 @@ import Foundation
 /// Opened with NSReadOnlyPersistentStoreOption, so this path can never write.
 @MainActor
 final class ReadStore {
-    static let storeURL = URL(
+    nonisolated static let storeURL = URL(
         fileURLWithPath: NSHomeDirectory() + "/Library/Group Containers/group.com.apple.notes/NoteStore.sqlite")
 
     let context: NSManagedObjectContext

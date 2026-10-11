@@ -29,11 +29,43 @@ public struct MCPError: Error, Sendable {
 
 public protocol Tool: Sendable {
     var name: String { get }
+    /// Display name for clients.
+    var title: String? { get }
     var description: String { get }
     var inputSchema: JSONValue { get }
+    /// Behaviour hints (readOnlyHint, destructiveHint, idempotentHint, openWorldHint).
+    var annotations: ToolAnnotations { get }
     /// Throw `MCPError.invalidParams` for arguments that do not fit the schema; any other
     /// thrown error is reported to the model as an `isError` result.
     func call(_ arguments: [String: JSONValue]) async throws -> ToolResult
+}
+
+public struct ToolAnnotations: Sendable {
+    public var readOnly: Bool
+    public var destructive: Bool
+    public var idempotent: Bool
+
+    public init(readOnly: Bool = false, destructive: Bool = false, idempotent: Bool = false) {
+        self.readOnly = readOnly
+        self.destructive = destructive
+        self.idempotent = idempotent
+    }
+
+    public static let readOnly = ToolAnnotations(readOnly: true, idempotent: true)
+
+    var json: JSONValue {
+        var hints: [String: JSONValue] = ["readOnlyHint": .bool(readOnly), "openWorldHint": false]
+        if !readOnly {
+            hints["destructiveHint"] = .bool(destructive)
+            hints["idempotentHint"] = .bool(idempotent)
+        }
+        return .object(hints)
+    }
+}
+
+extension Tool {
+    public var title: String? { nil }
+    public var annotations: ToolAnnotations { ToolAnnotations() }
 }
 
 public struct ServerInfo: Sendable {
@@ -110,8 +142,13 @@ public final class Server: Sendable {
             return complete(result)
         case "tools/list":
             if params["cursor"] != nil { throw MCPError.invalidParams("Invalid cursor") }
-            let list: [JSONValue] = tools.map {
-                ["name": .string($0.name), "description": .string($0.description), "inputSchema": $0.inputSchema]
+            let list: [JSONValue] = tools.map { tool in
+                var entry: [String: JSONValue] = [
+                    "name": .string(tool.name), "description": .string(tool.description), "inputSchema": tool.inputSchema,
+                    "annotations": tool.annotations.json,
+                ]
+                if let title = tool.title { entry["title"] = .string(title) }
+                return .object(entry)
             }
             return complete(["tools": .array(list), "ttlMs": .int(ttlMs), "cacheScope": "public"])
         default:

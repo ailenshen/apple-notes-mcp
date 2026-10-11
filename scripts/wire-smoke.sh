@@ -21,11 +21,11 @@ cases = [
     ("discover without clientInfo is served", {"id": "s", "method": "server/discover", "params": {"_meta": META}},
      lambda r: None if r["id"] == "s" and "result" in r else r),
     ("tools/list", {"id": 2, "method": "tools/list", "params": {"_meta": META}},
-     lambda r: None if any(t["name"] == "spike_echo" for t in r["result"]["tools"])
+     lambda r: None if any(t["name"] == "read_note" for t in r["result"]["tools"])
         and "ttlMs" in r["result"] and "cacheScope" in r["result"] else r),
-    ("tools/call echo", {"id": 3, "method": "tools/call",
-        "params": {"_meta": META, "name": "spike_echo", "arguments": {"text": "hi 你好"}}},
-     lambda r: None if r["result"]["content"][0]["text"] == "hi 你好" and r["result"]["isError"] is False else r),
+    ("tools/call with bad arguments -> -32602", {"id": 3, "method": "tools/call",
+        "params": {"_meta": META, "name": "read_note", "arguments": {"id": 5}}},
+     lambda r: None if r["error"]["code"] == -32602 else r),
     ("unknown tool -> -32602", {"id": 4, "method": "tools/call", "params": {"_meta": META, "name": "nope"}},
      lambda r: None if r["error"]["code"] == -32602 else r),
     ("missing _meta -> -32602", {"id": 5, "method": "server/discover", "params": {}},

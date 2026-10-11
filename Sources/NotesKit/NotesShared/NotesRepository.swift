@@ -11,6 +11,9 @@ import NotesSharedShim
 public final class NotesRepository {
     private var readStore: ReadStore?
     private var writeContext: WriteContext?
+    /// Notes deleted by this process. The store may show them in their old folder for minutes
+    /// (Notes.app saves lazily in the background), so reads treat them as deleted until then.
+    public private(set) var deletedHere: Set<String> = []
 
     /// While set, writes only touch notes whose title starts with this prefix. Development
     /// builds and the checks set it to "MCP Test " so real notes are never written by accident.
@@ -168,8 +171,11 @@ public final class NotesRepository {
     }
 
     private func guardWritable(_ note: NSManagedObject) throws(NotesError) {
+        if deletedHere.contains(note.value(forKey: "identifier") as? String ?? "") { throw .refused("this note was moved to Recently Deleted") }
         if (note.value(forKey: "isPasswordProtected") as? Bool) == true { throw .refused("locked notes cannot be changed") }
         if (note.value(forKey: "markedForDeletion") as? Bool) == true { throw .refused("this note is deleted") }
+        if Self.isTrash(note.value(forKey: "folder") as? NSManagedObject) { throw .refused("this note is in Recently Deleted; restore it in Notes first") }
+        if Self.isShared(note) { throw .refused("shared notes are read-only here") }
         if let prefix = writeGuardTitlePrefix, (note.value(forKey: "title") as? String)?.hasPrefix(prefix) != true {
             throw .refused("refusing to write: only notes titled \"\(prefix)…\" may be written while the write guard is on")
         }
@@ -191,13 +197,13 @@ public final class NotesRepository {
         }
     }
 
-    public static let supportDirectory = FileManager.default.homeDirectoryForCurrentUser
+    nonisolated public static let supportDirectory = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/AppleNotesMCP", isDirectory: true)
 
     /// A short content hash of the note as Markdown. Passed back by the caller on write so a
     /// note edited in between is not overwritten. Content-only on purpose: modification
     /// dates in the store lag Notes.app and are not updated by in-place edits.
-    public static func version(of blocks: [Block]) -> String {
+    nonisolated public static func version(of blocks: [Block]) -> String {
         let digest = SHA256.hash(data: Data(MarkdownRenderer.render(blocks).utf8))
         return digest.prefix(6).map { String(format: "%02x", $0) }.joined()
     }
@@ -243,27 +249,170 @@ public final class NotesRepository {
 
     public func modificationDate(id: String) throws(NotesError) -> Date { try note(id: id).modified }
 
-    /// Debug hook for the spike gate: sends a selector that does not exist, to prove the
-    /// shim turns the Objective-C exception into an error instead of killing the process.
-    public func provokeObjCException() throws(NotesError) {
-        _ = try send(NSObject(), "spikeSelectorThatDoesNotExist")
-    }
-
-    private func snapshot(of note: NSManagedObject) throws(NotesError) -> NoteSnapshot {
-        let text: String
-        if let mergeable = try send(note, "mergeableString"),
+    private func snapshot(of note: NSManagedObject, includeText: Bool = true) throws(NotesError) -> NoteSnapshot {
+        var text = ""
+        if includeText, (note.value(forKey: "isPasswordProtected") as? Bool) != true, let mergeable = try send(note, "mergeableString"),
             let attributed = try send(mergeable, "attributedString") as? NSAttributedString
         {
             text = attributed.string
-        } else {
-            text = ""
         }
-        let folder = (note.value(forKey: "folder") as? NSObject)?.value(forKey: "title") as? String
+        let folder = note.value(forKey: "folder") as? NSManagedObject
         return NoteSnapshot(
             id: note.value(forKey: "identifier") as? String ?? "",
             title: note.value(forKey: "title") as? String ?? "",
-            folder: folder ?? "",
+            folder: folder?.value(forKey: "title") as? String ?? "",
+            folderID: folder?.value(forKey: "identifier") as? String ?? "",
+            folderPath: folder.map { Self.path(of: $0, multipleAccounts: hasMultipleAccounts) } ?? "",
             modified: note.value(forKey: "modificationDate") as? Date ?? .distantPast,
+            created: note.value(forKey: "creationDate") as? Date ?? .distantPast,
+            isPinned: (note.value(forKey: "isPinned") as? Bool) ?? false,
+            isLocked: (note.value(forKey: "isPasswordProtected") as? Bool) ?? false,
+            isShared: Self.isShared(note),
+            isInTrash: Self.isTrash(folder) || deletedHere.contains(note.value(forKey: "identifier") as? String ?? ""),
             text: text)
+    }
+
+    // MARK: Folders
+
+    private var hasMultipleAccounts = false
+
+    /// User folders as a flat list in path order.
+    public func folders() throws(NotesError) -> [FolderSnapshot] {
+        let store = try store()
+        store.refresh()
+        let accounts = try fetch(store, "ICAccount", NSPredicate(format: "markedForDeletion == NO"))
+        hasMultipleAccounts = accounts.count > 1
+        let folders = try fetch(store, "ICFolder", NSPredicate(format: "markedForDeletion == NO AND folderType != 1 AND smartFolderQueryJSON == nil"))
+        let notes = try fetch(store, "ICNote", NSPredicate(format: "markedForDeletion == NO"))
+        var counts: [NSManagedObjectID: Int] = [:]
+        for note in notes where !deletedHere.contains(note.value(forKey: "identifier") as? String ?? "") {
+            if let folder = note.value(forKey: "folder") as? NSManagedObject { counts[folder.objectID, default: 0] += 1 }
+        }
+        return folders.map { folder in
+            FolderSnapshot(
+                id: folder.value(forKey: "identifier") as? String ?? "",
+                path: Self.path(of: folder, multipleAccounts: hasMultipleAccounts),
+                noteCount: counts[folder.objectID] ?? 0)
+        }.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+    }
+
+    /// Notes in one folder, pinned first, then newest first. Text is not loaded.
+    public func notes(inFolder folderID: String) throws(NotesError) -> [NoteSnapshot] {
+        let store = try store()
+        store.refresh()
+        _ = try folders()
+        let notes = try fetch(store, "ICNote", NSPredicate(format: "markedForDeletion == NO AND folder.identifier == %@", folderID))
+        return try notes.map { note throws(NotesError) in try snapshot(of: note, includeText: false) }
+            .filter { !deletedHere.contains($0.id) }
+            .sorted { ($0.isPinned ? 1 : 0, $0.modified) > ($1.isPinned ? 1 : 0, $1.modified) }
+    }
+
+    /// User folder paths keyed by store primary key, for the SQL-based search.
+    public func folderPathsByPrimaryKey() throws(NotesError) -> [Int64: String] {
+        let store = try store()
+        store.refresh()
+        let folders = try fetch(store, "ICFolder", NSPredicate(format: "markedForDeletion == NO AND folderType != 1 AND smartFolderQueryJSON == nil"))
+        var out: [Int64: String] = [:]
+        for folder in folders {
+            let last = folder.objectID.uriRepresentation().lastPathComponent
+            if last.hasPrefix("p"), let pk = Int64(last.dropFirst()) {
+                out[pk] = Self.path(of: folder, multipleAccounts: hasMultipleAccounts)
+            }
+        }
+        return out
+    }
+
+    /// Finds a folder by id or by path ("Parent/Child", case-insensitive).
+    public func resolveFolder(_ reference: String) throws(NotesError) -> FolderSnapshot {
+        let all = try folders()
+        if let byID = all.first(where: { $0.id == reference }) { return byID }
+        let wanted = reference.trimmingCharacters(in: CharacterSet(charactersIn: "/ ")).lowercased()
+        let exact = all.filter { $0.path.lowercased() == wanted }
+        if exact.count == 1 { return exact[0] }
+        let byLeaf = all.filter { $0.path.lowercased().hasSuffix("/" + wanted) || $0.path.lowercased() == wanted }
+        if byLeaf.count == 1 { return byLeaf[0] }
+        if byLeaf.isEmpty { throw .notFound("folder \"\(reference)\"; call overview to see folder paths") }
+        throw .refused("folder \"\(reference)\" is ambiguous: " + byLeaf.map { "\($0.path) (\($0.id))" }.joined(separator: ", "))
+    }
+
+    static func path(of folder: NSManagedObject, multipleAccounts: Bool) -> String {
+        var parts: [String] = []
+        var current: NSManagedObject? = folder
+        while let f = current {
+            parts.insert(f.value(forKey: "title") as? String ?? "", at: 0)
+            current = f.value(forKey: "parent") as? NSManagedObject
+        }
+        if multipleAccounts, let account = (folder.value(forKey: "account") as? NSManagedObject)?.value(forKey: "name") as? String {
+            parts.insert(account, at: 0)
+        }
+        return parts.joined(separator: "/")
+    }
+
+    static func isTrash(_ folder: NSManagedObject?) -> Bool {
+        (folder?.value(forKey: "folderType") as? Int) == 1
+    }
+
+    /// Shared through iCloud, directly or through a shared folder. Shared notes are read-only
+    /// here: in-place edits on them are not verified.
+    /// 当验证过共享笔记的原地修改与同步后，放开共享笔记的写入。
+    static func isShared(_ note: NSManagedObject) -> Bool {
+        if note.value(forKey: "serverShareData") != nil { return true }
+        var folder = note.value(forKey: "folder") as? NSManagedObject
+        while let f = folder {
+            if f.value(forKey: "serverShareData") != nil { return true }
+            folder = f.value(forKey: "parent") as? NSManagedObject
+        }
+        return false
+    }
+
+    private func fetch(_ store: ReadStore, _ entity: String, _ predicate: NSPredicate) throws(NotesError) -> [NSManagedObject] {
+        let request = NSFetchRequest<NSManagedObject>(entityName: entity)
+        request.predicate = predicate
+        do {
+            return try store.context.fetch(request)
+        } catch {
+            throw .failed("listing \(entity) failed: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: Deleting
+
+    /// Moves a note to Recently Deleted through Notes itself. Both checks ask Notes.app, not
+    /// the store: the store can lag Notes.app by minutes while it is in the background, and
+    /// deleting a note that is already in Recently Deleted erases it for good. `exists note id`
+    /// is no help either; it stays true for notes in Recently Deleted (verified 2026-10-12).
+    public func delete(id: String) async throws(NotesError) {
+        let snapshot = try note(id: id)
+        if snapshot.isInTrash { throw .refused("the note is already in Recently Deleted; deleting it again would erase it for good") }
+        if snapshot.isShared { throw .refused("shared notes are read-only here") }
+        if let prefix = writeGuardTitlePrefix, !snapshot.title.hasPrefix(prefix) {
+            throw .refused("refusing to delete: only notes titled \"\(prefix)…\" may be changed while the write guard is on")
+        }
+        let target = try syncTarget(id: id)
+        let trash = try trashFolderURI(forNote: id)
+        func inTrash() throws(NotesError) -> Bool {
+            try AppleScript.run("tell application \"Notes\" to (id of notes of folder id \"\(trash)\") contains \"\(target.noteURI)\"") == "true"
+        }
+        if try inTrash() { throw .refused("Notes already has this note in Recently Deleted; deleting it again would erase it for good") }
+        try AppleScript.run("tell application \"Notes\" to delete note id \"\(target.noteURI)\"")
+        for _ in 0..<20 {
+            if try inTrash() {
+                deletedHere.insert(id)
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        throw .failed("Notes did not confirm the delete within 5 seconds; check Recently Deleted before trying again")
+    }
+
+    /// The Recently Deleted folder of the note's account, as an AppleScript id.
+    private func trashFolderURI(forNote id: String) throws(NotesError) -> String {
+        let store = try store()
+        let note = try store.note(id: id)
+        let account = (note.value(forKey: "folder") as? NSManagedObject)?.value(forKey: "account") as? NSManagedObject
+        let trash = try fetch(store, "ICFolder", NSPredicate(format: "folderType == 1 AND markedForDeletion == NO"))
+            .first { account == nil || ($0.value(forKey: "account") as? NSManagedObject) == account }
+        guard let trash else { throw .failed("cannot find the Recently Deleted folder") }
+        return trash.objectID.uriRepresentation().absoluteString
     }
 }
