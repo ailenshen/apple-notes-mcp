@@ -10,6 +10,8 @@ let package = Package(
     platforms: [.macOS(.v26)],
     targets: [
         .target(name: "MCPCore"),
-        .executableTarget(name: "AppleNotesMCP", dependencies: ["MCPCore"]),
+        .target(name: "NotesSharedShim"),
+        .target(name: "NotesKit", dependencies: ["NotesSharedShim"]),
+        .executableTarget(name: "AppleNotesMCP", dependencies: ["MCPCore", "NotesKit"]),
     ]
 )
