@@ -31,6 +31,20 @@ final class WriteContext {
         return found
     }
 
+    func folder(id: String) throws(NotesError) -> NSManagedObject {
+        let request = NSFetchRequest<NSManagedObject>(entityName: "ICFolder")
+        request.predicate = NSPredicate(format: "identifier == %@", id)
+        request.fetchLimit = 1
+        let found: NSManagedObject?
+        do {
+            found = try context.fetch(request).first
+        } catch {
+            throw .failed("fetching folder failed: \(error.localizedDescription)")
+        }
+        guard let found else { throw .notFound("folder \(id)") }
+        return found
+    }
+
     func save() throws(NotesError) {
         do {
             try context.save()

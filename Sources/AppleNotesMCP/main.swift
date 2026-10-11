@@ -67,7 +67,10 @@ struct SpikeAppend: Tool {
         let start = clock.now
         do {
             let before = try await repository.cloudState(id: id)
-            let readBack = try await repository.spikeAppend(id: id, text: text)
+            let outcome = try await repository.update(id: id, expectedVersion: nil) { blocks in
+                blocks + [.paragraph(Paragraph(kind: .body, content: [.text(TextRun(text))]))]
+            }
+            let readBack = outcome.mismatch == nil
             let wrote = clock.now - start
             let report = try await sync.settle(id: id)
             return ToolResult(
@@ -80,7 +83,7 @@ struct SpikeAppend: Tool {
     }
 }
 
-let repository = NotesRepository()
+let repository = NotesRepository(writeGuardTitlePrefix: "MCP Test ")
 let sync = SyncCoordinator(repository: repository)
 let server = Server(
     info: ServerInfo(name: "apple-notes-mcp", version: "2.0.0-dev"),

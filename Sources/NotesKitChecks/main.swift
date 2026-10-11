@@ -5,6 +5,7 @@ import NotesKit
 // (read-only) and checks that render → parse gives back the same blocks.
 // 当工具链带 XCTest 或 Swift Testing 宏时，把 unit 部分重构为正式测试。
 
+setvbuf(stdout, nil, _IONBF, 0)
 var failures = 0
 
 @MainActor
@@ -121,16 +122,124 @@ func note(features: inout [String: Int], _ block: Block) {
     }
 }
 
+/// G5: write-side round trip on a fresh "MCP Test" note, then delete it.
+@MainActor
+func writeTest() async {
+    let repository = NotesRepository(writeGuardTitlePrefix: "MCP Test ")
+    let sync = SyncCoordinator(repository: repository)
+    let title = "MCP Test G5 \(UUID().uuidString.prefix(8))"
+    let markdown = """
+        # \(title)
+        Intro with **bold**, *italic*, ~~strike~~, <u>underline</u>, <mark>highlight</mark> and a [link](https://example.com/a_b).
+
+        ## Lists
+        * bullet
+          * nested bullet
+        - dash
+        1. first
+        2. second
+        - [ ] open task
+        - [x] done task
+        > quoted line
+        ```
+        let code = "raw *text*"
+        ```
+        | Name | Score |
+        | --- | --- |
+        | Alice | 90 |
+        ### Tail
+        Colored words stay red. Near text here.
+        """
+    let target = MarkdownParser.parse(markdown)
+    var id = ""
+    func step(_ name: String, _ body: () async throws -> String?) async {
+        do {
+            if let problem = try await body() { expect(false, "\(name): \(problem)") } else { print("ok  ", name) }
+        } catch {
+            expect(false, "\(name): \(error)")
+        }
+    }
+    await step("create reads back exactly") {
+        let outcome = try repository.create(folderID: nil, blocks: target)
+        id = outcome.id
+        print("     created", id)
+        return outcome.mismatch
+    }
+    guard !id.isEmpty else { return }
+    await step("create uploads to iCloud") {
+        let report = try await sync.settle(id: id)
+        return report.synced ? nil : "not synced after \(report.total)"
+    }
+    await step("title comes from the first line") {
+        let t = try repository.note(id: id).title
+        return t == title ? nil : "title is \(t)"
+    }
+    await step("hidden color survives an edit nearby") {
+        try repository.diagnosticColor(id: id, text: "Colored words")
+        guard try repository.diagnosticAttributeKeys(id: id, text: "Colored words").contains("TTColor") else { return "color was not set" }
+        let before = try repository.modificationDate(id: id)
+        try await Task.sleep(for: .seconds(1.2))
+        let outcome = try repository.update(id: id, expectedVersion: nil) { blocks throws(NotesError) in
+            MarkdownParser.parse(MarkdownRenderer.render(blocks).replacingOccurrences(of: "Near text here.", with: "Near text **edited** here.")
+                .replacingOccurrences(of: "stay red.", with: "stay red!"))
+        }
+        if let mismatch = outcome.mismatch { return mismatch }
+        let keys = try repository.diagnosticAttributeKeys(id: id, text: "Colored words")
+        if !keys.contains("TTColor") { return "color lost after edit; keys \(keys)" }
+        let after = try repository.modificationDate(id: id)
+        return after > before ? nil : "modification date did not move (\(before) → \(after))"
+    }
+    await step("stale version is refused") {
+        do {
+            _ = try repository.update(id: id, expectedVersion: "000000000000") { $0 }
+            return "write with a wrong version was accepted"
+        } catch NotesError.conflict {
+            return nil
+        }
+    }
+    await step("title rename and checklist toggle") {
+        let current = try repository.blocks(id: id)
+        let version = NotesRepository.version(of: current)
+        let outcome = try repository.update(id: id, expectedVersion: version) { blocks throws(NotesError) in
+            MarkdownParser.parse(MarkdownRenderer.render(blocks).replacingOccurrences(of: "# \(title)", with: "# \(title) renamed")
+                .replacingOccurrences(of: "- [ ] open task", with: "- [x] open task"))
+        }
+        if let mismatch = outcome.mismatch { return mismatch }
+        return outcome.title == "\(title) renamed" ? nil : "title is \(outcome.title)"
+    }
+    await step("removing an attachment-free table and full replace") {
+        let replacement = MarkdownParser.parse("""
+            # \(title) replaced
+            Completely new body.
+            - [ ] fresh task
+            | A | B | C |
+            | --- | --- | --- |
+            | 1 | 2 | 3 |
+            """)
+        let outcome = try repository.update(id: id, expectedVersion: nil) { _ throws(NotesError) in replacement }
+        return outcome.mismatch
+    }
+    await step("edits upload to iCloud") {
+        let report = try await sync.settle(id: id)
+        return report.synced ? nil : "not synced after \(report.total)"
+    }
+    print("     note left for inspection:", id)
+}
+
 let command = CommandLine.arguments.dropFirst().first ?? "unit"
 switch command {
 case "unit": unitChecks()
 case "roundtrip": roundTrip()
-case "render":
-    let repository = NotesRepository()
-    for id in CommandLine.arguments.dropFirst(2) {
-        do { print(MarkdownRenderer.render(try repository.blocks(id: id))) } catch { print("error:", error) }
-        print("-----")
-    }
-default: print("usage: NotesKitChecks unit|roundtrip|render <id>…")
+case "writetest": await writeTest()
+case "create":
+    // Reads Markdown from stdin and creates a note with it (write guard on).
+    let markdown = String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self)
+    do {
+        let outcome = try NotesRepository(writeGuardTitlePrefix: "MCP Test ").create(folderID: nil, blocks: MarkdownParser.parse(markdown))
+        print(outcome.id, outcome.mismatch ?? "exact")
+        let report = try await SyncCoordinator(repository: NotesRepository()).settle(id: outcome.id)
+        print("synced:", report.synced)
+    } catch { print("error:", error) }
+default: print("usage: NotesKitChecks unit|roundtrip|render <id>…|writetest|create < markdown")
 }
 exit(failures == 0 ? 0 : 1)

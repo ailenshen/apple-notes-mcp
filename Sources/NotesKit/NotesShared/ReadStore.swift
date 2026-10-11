@@ -31,6 +31,8 @@ final class ReadStore {
         guard store.isReadOnly else { throw .failed("store opened read-write; refusing to continue") }
         context = NSManagedObjectContext(concurrencyType: .mainQueueConcurrencyType)
         context.persistentStoreCoordinator = coordinator
+        // Never serve cached rows: Notes and our writer change the store underneath us.
+        context.stalenessInterval = 0
     }
 
     /// Drops cached objects so the next fetch sees what Notes (or our writer) saved since.

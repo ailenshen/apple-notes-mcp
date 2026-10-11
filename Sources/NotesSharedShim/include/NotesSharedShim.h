@@ -23,6 +23,17 @@ NS_ASSUME_NONNULL_BEGIN
 + (BOOL)send:(id)target selector:(NSString *)selector unsignedInteger:(NSUInteger)first unsignedInteger:(NSUInteger)second result:(id _Nullable * _Nonnull)result error:(NSError **)error;
 /// Object-returning send with one object argument. The result may legitimately be nil.
 + (BOOL)send:(id)target selector:(NSString *)selector object:(nullable id)argument result:(id _Nullable * _Nonnull)result error:(NSError **)error;
+/// Void send with an object and an NSUInteger, e.g. insertAttributedString:atIndex:.
++ (BOOL)send:(id)target selector:(NSString *)selector object:(id)argument index:(NSUInteger)index error:(NSError **)error;
+/// Object-returning send with one BOOL argument, e.g. -[ICTTTodo todoWithDone:].
++ (BOOL)send:(id)target selector:(NSString *)selector boolean:(BOOL)flag result:(id _Nullable * _Nonnull)result error:(NSError **)error;
+/// [[cls alloc] <selector>object boolean], e.g. -[ICTTTodo initWithIdentifier:done:].
++ (BOOL)allocClass:(NSString *)className initSelector:(NSString *)selector object:(id)argument boolean:(BOOL)flag result:(id _Nullable * _Nonnull)result error:(NSError **)error;
+/// Supplies -[NSMutableAttributedString ic_convertParagraphStyleToBodyInRange:], which
+/// -[ICNote addTableAttachmentWithText:] calls. Notes gets it from NotesEditor.framework, but
+/// loading that framework makes later mid-note edits save a truncated body, so NotesKit
+/// never loads it and installs this equivalent instead. Does nothing if the method exists.
++ (void)installParagraphStyleToBodyConversion;
 @end
 
 NS_ASSUME_NONNULL_END

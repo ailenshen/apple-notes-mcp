@@ -45,6 +45,13 @@ enum Loader {
     /// Starts Notes' shared note context once per process. Writes need it, and so does
     /// reading table cells: without it ICTable reports 0×0 even in the read-only store.
     /// 当能不启动共享上下文就读出表格（或有官方 API）时，读路径去掉这一步，保持读路径不碰 Notes 内部机制。
+    /// Table creation needs one NotesEditor category method; NotesKit supplies it rather
+    /// than loading NotesEditor.framework (see NSShim.installParagraphStyleToBodyConversion).
+    /// 当 Apple 开放创建表格的官方 API，或 NotesEditor 不再影响保存时，删除这个替代实现。
+    @MainActor static func prepareTableCreation() {
+        NSShim.installParagraphStyleToBodyConversion()
+    }
+
     @MainActor static func startSharedContext() throws(NotesError) {
         try load()
         if sharedContextStarted { return }

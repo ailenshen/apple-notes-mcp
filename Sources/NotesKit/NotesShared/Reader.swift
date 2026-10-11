@@ -7,6 +7,13 @@ import NotesSharedShim
 @MainActor
 struct Reader {
     let context: NSManagedObjectContext
+    /// Tables that exist only in a writer's dry run, by placeholder id.
+    var pendingTables: [String: [[String]]] = [:]
+
+    init(context: NSManagedObjectContext, pendingTables: [String: [[String]]] = [:]) {
+        self.context = context
+        self.pendingTables = pendingTables
+    }
 
     static let attachmentKey = NSAttributedString.Key("NSAttachment")
 
@@ -140,6 +147,7 @@ struct Reader {
     /// Reads cells through Notes' table model. Returns nil when the table cannot be read, so
     /// the caller shows it as an opaque attachment instead.
     private func tableRows(_ attachment: NSObject) throws(NotesError) -> [[String]]? {
+        if let id = attachment.value(forKey: "attachmentIdentifier") as? String, let rows = pendingTables[id] { return rows }
         try Loader.startSharedContext()
         var model: AnyObject?
         do {
