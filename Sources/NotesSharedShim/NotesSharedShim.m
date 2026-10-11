@@ -68,4 +68,22 @@ static SEL ShimSelector(id target, NSString *name, NSError **error) {
     return [self performBlock:^{ ((void (*)(id, SEL, NSUInteger, NSRange, NSInteger))objc_msgSend)(target, sel, value, range, delta); } error:error];
 }
 
++ (BOOL)send:(id)target selector:(NSString *)selector unsignedInteger:(NSUInteger)first unsignedInteger:(NSUInteger)second result:(id _Nullable * _Nonnull)result error:(NSError **)error {
+    SEL sel = ShimSelector(target, selector, error);
+    if (!sel) return NO;
+    __block id value = nil;
+    BOOL ok = [self performBlock:^{ value = ((id (*)(id, SEL, NSUInteger, NSUInteger))objc_msgSend)(target, sel, first, second); } error:error];
+    *result = value;
+    return ok;
+}
+
++ (BOOL)send:(id)target selector:(NSString *)selector object:(nullable id)argument result:(id _Nullable * _Nonnull)result error:(NSError **)error {
+    SEL sel = ShimSelector(target, selector, error);
+    if (!sel) return NO;
+    __block id value = nil;
+    BOOL ok = [self performBlock:^{ value = ((id (*)(id, SEL, id))objc_msgSend)(target, sel, argument); } error:error];
+    *result = value;
+    return ok;
+}
+
 @end

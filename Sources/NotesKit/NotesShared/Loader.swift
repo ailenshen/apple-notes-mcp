@@ -19,7 +19,9 @@ enum Loader {
     /// Core Data properties are generated at runtime, so they are checked against the
     /// model's entities rather than with respondsToSelector.
     static let requiredProperties: [String: [String]] = [
-        "ICNote": ["identifier", "title", "folder", "modificationDate"],
+        "ICNote": ["identifier", "title", "folder", "modificationDate", "markedForDeletion", "isPasswordProtected"],
+        "ICInlineAttachment": ["identifier", "altText", "tokenContentIdentifier"],
+        "ICAttachment": ["identifier"],
         "ICFolder": ["identifier", "title"],
     ]
 
@@ -38,6 +40,20 @@ enum Loader {
     }
 
     @MainActor private static var loaded = false
+    @MainActor private static var sharedContextStarted = false
+
+    /// Starts Notes' shared note context once per process. Writes need it, and so does
+    /// reading table cells: without it ICTable reports 0×0 even in the read-only store.
+    /// 当能不启动共享上下文就读出表格（或有官方 API）时，读路径去掉这一步，保持读路径不碰 Notes 内部机制。
+    @MainActor static func startSharedContext() throws(NotesError) {
+        try load()
+        if sharedContextStarted { return }
+        let noteContext = try cls("ICNoteContext")
+        try call(noteContext, "startSharedContextWithOptions:") {
+            try NSShim.send(noteContext, selector: "startSharedContextWithOptions:", unsignedInteger: 0)
+        }
+        sharedContextStarted = true
+    }
 
     @MainActor static func load() throws(NotesError) {
         if loaded { return }

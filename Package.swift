@@ -13,5 +13,8 @@ let package = Package(
         .target(name: "NotesSharedShim"),
         .target(name: "NotesKit", dependencies: ["NotesSharedShim"]),
         .executableTarget(name: "AppleNotesMCP", dependencies: ["MCPCore", "NotesKit"]),
+        // Runnable checks, because `swift test` needs Xcode (XCTest / Swift Testing macros).
+        // 当工具链带 XCTest 或 Swift Testing 宏时，重构为 testTarget。
+        .executableTarget(name: "NotesKitChecks", dependencies: ["NotesKit"]),
     ]
 )

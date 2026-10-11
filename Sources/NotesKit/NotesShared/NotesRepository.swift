@@ -33,6 +33,34 @@ public final class NotesRepository {
         return try snapshot(of: store.note(id: id))
     }
 
+    /// The note body as blocks, through the same mapping that Markdown rendering uses.
+    public func blocks(id: String) throws(NotesError) -> [Block] {
+        let store = try store()
+        store.refresh()
+        let note = try store.note(id: id)
+        if (note.value(forKey: "isPasswordProtected") as? Bool) == true {
+            throw .refused("note \(id) is locked; locked notes are not read")
+        }
+        guard let mergeable = try send(note, "mergeableString"),
+            let attributed = try send(mergeable, "attributedString") as? NSAttributedString
+        else { return [] }
+        return try Reader(context: store.context).blocks(attributed)
+    }
+
+    /// Ids of every readable note (not deleted, not locked), newest first.
+    public func noteIDs() throws(NotesError) -> [String] {
+        let store = try store()
+        store.refresh()
+        let request = NSFetchRequest<NSManagedObject>(entityName: "ICNote")
+        request.predicate = NSPredicate(format: "markedForDeletion == NO AND isPasswordProtected == NO")
+        request.sortDescriptors = [NSSortDescriptor(key: "modificationDate", ascending: false)]
+        do {
+            return try store.context.fetch(request).compactMap { $0.value(forKey: "identifier") as? String }
+        } catch {
+            throw .failed("listing notes failed: \(error.localizedDescription)")
+        }
+    }
+
     public func cloudState(id: String) throws(NotesError) -> CloudState {
         let store = try store()
         store.refresh()

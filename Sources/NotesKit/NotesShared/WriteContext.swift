@@ -2,18 +2,14 @@ import CoreData
 import Foundation
 import NotesSharedShim
 
-/// Notes' own read-write Core Data context (ICNoteContext). Started only on the first write,
-/// because starting it brings up Notes' internal machinery that reads never need.
+/// Notes' own read-write Core Data context (ICNoteContext), created on the first write.
 @MainActor
 final class WriteContext {
     let context: NSManagedObjectContext
 
     init() throws(NotesError) {
-        try Loader.load()
+        try Loader.startSharedContext()
         let noteContext = try Loader.cls("ICNoteContext")
-        try call(noteContext, "startSharedContextWithOptions:") {
-            try NSShim.send(noteContext, selector: "startSharedContextWithOptions:", unsignedInteger: 0)
-        }
         guard let shared = try send(noteContext, "sharedContext"),
             let container = try send(shared, "persistentContainer"),
             let viewContext = try send(container, "viewContext") as? NSManagedObjectContext
