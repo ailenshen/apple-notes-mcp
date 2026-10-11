@@ -46,7 +46,9 @@ To support native formatting, the server uses Notes.app's built-in Markdown impo
 | **Full Disk Access** | System Settings > Privacy & Security > Full Disk Access > enable `node` | Read the Notes database for listing and searching |
 | **Accessibility** | System Settings > Privacy & Security > Accessibility > enable `node` | Auto-confirm the Import dialog when creating notes |
 
-On first use, macOS will prompt you to approve — just click Allow. If you missed the prompt, go to the settings above and turn on `node` manually. After granting, restart your MCP client.
+On first use, macOS will prompt you to approve — just click Allow. If you missed the prompt, go to the settings above and turn it on manually. After granting, restart your MCP client.
+
+> **Which app gets the permission?** macOS gives it to the app that starts the server. With Claude Desktop that is usually `node`. From a terminal it is the terminal app. Under a background service (for example a tunnel client), it is that service. If a toggle is on but access still fails, remove the entry with "−" and add it again with "+" — this happens when that app was updated or rebuilt.
 
 > If a permission is missing, the server will tell you exactly which one and how to fix it.
 
@@ -65,8 +67,8 @@ Just talk to your AI naturally:
 
 | Tool | Description |
 |------|-------------|
-| `list_notes` | Browse notes, optionally filter by folder |
-| `search_notes` | Find notes by keyword |
+| `list_notes` | Browse notes, newest first, one line each (50 by default), optionally filter by folder |
+| `search_notes` | Full-text search across titles and note bodies, with an excerpt around each match |
 | `get_note` | Read full content as Markdown |
 | `create_note` | Write Markdown → natively formatted note |
 | `update_note` | Replace content, preserving folder |

@@ -86,26 +86,40 @@ function isTimeoutError(error: unknown): boolean {
   return e.message.toLowerCase().includes("timed out");
 }
 
-const FULL_DISK_ACCESS_HINT = [
-  `Missing "Full Disk Access" permission.`,
-  ``,
-  `Go to System Settings > Privacy & Security > Full Disk Access, find "node" in the list, and turn it on.`,
-  `Then restart your MCP client (Claude Desktop, Claude Code, etc.).`,
-].join("\n");
+// macOS grants these permissions to the "responsible" app: the app that started
+// this server, not necessarily `node`. Under Claude Desktop that is usually
+// `node`; under a terminal it is the terminal app; under a launchd service such
+// as frpc it is that service's binary. A toggle can also look "on" but be stale
+// after the responsible binary was rebuilt or updated (ad-hoc signed binaries
+// are identified by hash), so the hints always say to remove and re-add.
+// 当 2.0 改为带固定签名、自己承担权限的 .app 时，提示改为直接点名该 app，并打开引导窗口。
+function permissionHint(name: string, settingsUrl: string, purpose: string): string {
+  return [
+    `Missing "${name}" permission (${purpose}).`,
+    ``,
+    `Open System Settings > Privacy & Security > ${name} (${settingsUrl}).`,
+    `Turn it on for the app that starts this MCP server: "node", your terminal app, or the service that launches it (for example frpc).`,
+    `If it is already on but still fails, remove it with "−", add it again with "+", then restart your MCP client.`,
+  ].join("\n");
+}
 
-const ACCESSIBILITY_HINT = [
-  `Missing "Accessibility" permission.`,
-  ``,
-  `Go to System Settings > Privacy & Security > Accessibility, find "node" in the list, and turn it on.`,
-  `Then restart your MCP client (Claude Desktop, Claude Code, etc.).`,
-].join("\n");
+const FULL_DISK_ACCESS_HINT = permissionHint(
+  "Full Disk Access",
+  "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
+  "needed to read the Notes database"
+);
 
-const AUTOMATION_HINT = [
-  `Missing "Automation" permission for Notes.`,
-  ``,
-  `Go to System Settings > Privacy & Security > Automation, find "node" (or your MCP client), expand it, and enable "Notes".`,
-  `Then restart your MCP client (Claude Desktop, Claude Code, etc.).`,
-].join("\n");
+const ACCESSIBILITY_HINT = permissionHint(
+  "Accessibility",
+  "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+  "needed to confirm the Notes import dialog"
+);
+
+const AUTOMATION_HINT = permissionHint(
+  "Automation",
+  "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation",
+  "needed to control the Notes app; expand the entry and enable \"Notes\""
+);
 
 const TIMEOUT_HINT = `AppleScript timed out after 30s. The Notes app may be unresponsive — try again, and if it persists quit and reopen Notes.`;
 

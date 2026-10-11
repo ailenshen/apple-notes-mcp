@@ -11,9 +11,25 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import { randomUUID, randomBytes } from "node:crypto";
-import { listNotes, searchNotes, listFolders, findNoteByTitle } from "./db.js";
+import { listNotes, searchNotes, type NoteRow } from "./db.js";
 import { getNoteBody, createNote, deleteNote, updateNote } from "./applescript.js";
 import { friendlyError, logError } from "./permissions.js";
+
+// --- Output formatting ---
+//
+// One line per note instead of pretty-printed JSON: an agent only needs the
+// title (every other tool takes a title) plus enough context to choose.
+// Internal ids are left out because no tool accepts them.
+// 当工具改为按 ZIDENTIFIER 精确定位笔记时，在这一行里加回 identifier。
+
+const DEFAULT_LIST_LIMIT = 50;
+const DEFAULT_SEARCH_LIMIT = 20;
+
+function noteLine(n: NoteRow): string {
+  return [n.title, n.folder, n.modified.slice(0, 10), n.is_pinned ? "pinned" : ""]
+    .filter(Boolean)
+    .join(" | ");
+}
 
 // --- Tool registration ---
 
@@ -26,16 +42,18 @@ function createServer(): McpServer {
   // --- list_notes ---
   server.tool(
     "list_notes",
-    "List notes from Apple Notes. Returns title, folder, dates, pinned status, snippet. Optionally filter by folder name and limit results.",
+    `List notes, newest first, one line each: "title | folder | modified date | pinned". Returns ${DEFAULT_LIST_LIMIT} by default. To find notes by content, use search_notes instead.`,
     {
       folder: z.string().optional().describe("Filter by folder name"),
-      limit: z.number().optional().describe("Max number of notes to return"),
+      limit: z.number().optional().describe(`Max number of notes to return (default ${DEFAULT_LIST_LIMIT})`),
     },
     async ({ folder, limit }) => {
       try {
-        const notes = listNotes(folder, limit);
+        const all = listNotes(folder);
+        const shown = all.slice(0, limit ?? DEFAULT_LIST_LIMIT);
+        const header = `Showing ${shown.length} of ${all.length} notes${folder ? ` in "${folder}"` : ""}.`;
         return {
-          content: [{ type: "text", text: JSON.stringify(notes, null, 2) }],
+          content: [{ type: "text", text: [header, ...shown.map(noteLine)].join("\n") }],
         };
       } catch (e: unknown) {
         logError("list_notes", e);
@@ -50,16 +68,19 @@ function createServer(): McpServer {
   // --- search_notes ---
   server.tool(
     "search_notes",
-    "Search Apple Notes by keyword. Searches in title and snippet. Returns matching notes with metadata.",
+    `Full-text search across note titles and bodies. All space-separated words must match (case-insensitive). Each result is "title | folder | modified date" followed by an excerpt around the match, so you often don't need get_note. Returns ${DEFAULT_SEARCH_LIMIT} by default; title matches come first.`,
     {
-      query: z.string().describe("Search keyword"),
-      limit: z.number().optional().describe("Max number of results"),
+      query: z.string().describe("Words to search for"),
+      limit: z.number().optional().describe(`Max number of results (default ${DEFAULT_SEARCH_LIMIT})`),
     },
     async ({ query, limit }) => {
       try {
-        const notes = searchNotes(query, limit);
+        const hits = searchNotes(query);
+        const shown = hits.slice(0, limit ?? DEFAULT_SEARCH_LIMIT);
+        const header = `${hits.length} notes match "${query}"${shown.length < hits.length ? `, showing ${shown.length}` : ""}.`;
+        const lines = shown.map((h) => `- ${noteLine(h)}\n  ${h.excerpt}`);
         return {
-          content: [{ type: "text", text: JSON.stringify(notes, null, 2) }],
+          content: [{ type: "text", text: [header, ...lines].join("\n") }],
         };
       } catch (e: unknown) {
         logError("search_notes", e);
