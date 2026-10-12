@@ -25,18 +25,18 @@ struct Reader {
             let newline = string.range(of: "\n", range: NSRange(location: start, length: string.length - start))
             let end = newline.location == NSNotFound ? string.length : newline.location
             let range = NSRange(location: start, length: end - start)
-            blocks.append(try block(attributed, range: range, styleAt: end < string.length ? end : max(start - 1, 0)))
+            // A paragraph's style sits on its characters and its closing newline. A last line
+            // with neither has no style of its own, so it reads as body.
+            blocks.append(try block(attributed, range: range, styleAt: end < string.length ? end : nil))
             if newline.location == NSNotFound { break }
             start = end + 1
         }
         return blocks
     }
 
-    private func block(_ attributed: NSAttributedString, range: NSRange, styleAt fallback: Int) throws(NotesError) -> Block {
+    private func block(_ attributed: NSAttributedString, range: NSRange, styleAt fallback: Int?) throws(NotesError) -> Block {
         let styleIndex = range.length > 0 ? range.location : fallback
-        let style = attributed.length > 0
-            ? attributed.attribute(NSAttributedString.Key("TTStyle"), at: min(styleIndex, attributed.length - 1), effectiveRange: nil) as? NSObject
-            : nil
+        let style = styleIndex.map { attributed.attribute(NSAttributedString.Key("TTStyle"), at: $0, effectiveRange: nil) as? NSObject } ?? nil
         let kind = Self.kind(style)
         let indent = (style?.value(forKey: "indent") as? Int) ?? 0
         let quote = (style?.value(forKey: "blockQuoteLevel") as? Int) ?? 0

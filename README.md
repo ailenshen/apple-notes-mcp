@@ -20,6 +20,8 @@ Version 2 is a native macOS app written in Swift. It works with Notes' own data 
 
 **Requires:** macOS 26 (Tahoe) or later, and an MCP client that speaks MCP protocol version 2026-07-28. Verified with Claude Code 2.1.296. Node.js is only needed for `npx`.
 
+> **Claude Desktop is not supported yet.** Claude Desktop 1.8555.2 still uses the older protocol (2025-11-25), and 2.0 speaks only the current one. Keep using version 1.x (`@latest`) there until Claude Desktop updates.
+
 ## Setup
 
 ### 1. Add it to your MCP client
