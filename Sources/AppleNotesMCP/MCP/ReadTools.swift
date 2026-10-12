@@ -173,43 +173,27 @@ struct OverviewTool: Tool {
         case .created: list.sort { $0.created > $1.created }
         case .title: list.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
         }
-        if group {
-            // Folders in tree order (the folder itself first), each folder's notes newest first.
-            let rank = Dictionary(uniqueKeysWithValues: all.enumerated().map { ($0.element.id, $0.offset) })
-            list = list.enumerated().sorted { (rank[$0.element.folderID] ?? 0, $0.offset) < (rank[$1.element.folderID] ?? 0, $1.offset) }.map(\.element)
-        }
+        // Truncate by the sort first, so grouping never drops a folder's newest notes.
         let shown = Array(list.prefix(limit))
         let ids = Set(shown.map(\.id))
         let bodies = try await notes.search.bodies(ids: ids)
         let attachments = try await notes.search.attachmentKinds(noteIDs: ids)
         // Across all folders the folder is always shown; within a folder, only once there are subfolders.
-        let showFolder = folder == nil || Set(shown.map(\.folderID)).count > 1
         let what = undescribed ? "notes without a current description" : "notes"
         let range = [window.label("modified"), created.label("created")].filter { !$0.isEmpty }.joined(separator: ", ")
         var lines = ["\(scopeName)\(range.isEmpty ? "" : " " + range) — \(list.count) \(what)\(list.count > shown.count ? ", showing \(shown.count)" : "")"]
         if let subfolderLine { lines.append(subfolderLine) }
         if list.isEmpty { return lines.joined(separator: "\n") }
         let dateName = order == .created ? "created" : "modified"
-        if showFolder {
-            lines.append(rootNames.isEmpty ? "[folder] heads the notes below it." : "[folder] heads the notes below it, relative to \(scopeName); [.] is \(scopeName) itself.")
-        }
-        lines.append("id | title | \(dateName) | size" + (undescribed ? "" : " | description"))
         let folderNames = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0.names) })
-        var lastFolder: String?
+        var items: [(folder: [String], lines: [String])] = []
         for note in shown {
-            if showFolder, note.folderID != lastFolder {
-                let names = folderNames[note.folderID] ?? []
-                let relative = names.count >= rootNames.count && Array(names.prefix(rootNames.count)) == rootNames ? Array(names.dropFirst(rootNames.count)) : names
-                lines.append("[\(relative.isEmpty ? "." : FolderPath.join(relative))]")
-                lastFolder = note.folderID
-            }
             let text = bodies[note.id] ?? ""
             let date = day(order == .created ? note.created : note.modified)
             var line = "\(ShortID.of(note.id)) | \(note.isPinned ? "📌 " : "")\(listTitle(note.title)) | "
                 + "\(date) | \(note.isLocked ? "locked" : sizeLabel(characters: text.count, attachments: attachments[note.id] ?? [:]))"
             if undescribed {
-                lines.append(line)
-                lines.append("  " + Self.opening(of: text, title: note.title))
+                items.append((folderNames[note.folderID] ?? [], [line, "  " + Self.opening(of: text, title: note.title)]))
                 continue
             }
             let summary: String
@@ -223,8 +207,12 @@ struct OverviewTool: Tool {
                 summary = "~ " + DescriptionIndex.extract(fromPlainText: text, title: note.title)
             }
             line += " | \(summary)"
-            lines.append(line)
+            items.append((folderNames[note.folderID] ?? [], [line]))
         }
+        let sections = FolderSections.render(items, root: folder == nil ? nil : rootNames, rootPath: scopeName, group: group)
+        if let legend = sections.legend { lines.append(legend) }
+        lines.append("id | title | \(dateName) | size" + (undescribed ? "" : " | description"))
+        lines += sections.lines
         if undescribed { lines.append("Write one line per note with describe_note, several notes per call.") }
         return lines.joined(separator: "\n")
     }
@@ -237,6 +225,44 @@ struct OverviewTool: Tool {
         let joined = lines.joined(separator: " ¶ ")
         if joined.isEmpty { return "(title only)" }
         return joined.count > 300 ? String(joined.prefix(299)) + "…" : joined
+    }
+}
+
+/// Note lines with each folder named once, on a "[folder]" line above its notes. Within a
+/// listed folder (`root`), paths are relative to it and "[.]" is the folder itself; across all
+/// folders, paths are full. With `group`, notes are gathered by folder, folders ordered by
+/// their first (best or newest) note and each folder keeping its notes' order; otherwise the
+/// order is kept and a folder line appears whenever the folder changes. Items come already
+/// sorted and truncated, so grouping never hides a folder's top notes.
+enum FolderSections {
+    static func render(
+        _ items: [(folder: [String], lines: [String])], root: [String]?, rootPath: String, group: Bool
+    ) -> (legend: String?, lines: [String]) {
+        let folders = items.map(\.folder)
+        let show = root == nil || Set(folders).count > 1
+        guard show else { return (nil, items.flatMap(\.lines)) }
+        var ordered = items
+        if group {
+            var order: [[String]] = []
+            for f in folders where !order.contains(f) { order.append(f) }
+            ordered = order.flatMap { f in items.filter { $0.folder == f } }
+        }
+        func label(_ names: [String]) -> String {
+            guard let root, names.count >= root.count, Array(names.prefix(root.count)) == root else { return FolderPath.join(names) }
+            let relative = Array(names.dropFirst(root.count))
+            return relative.isEmpty ? "." : FolderPath.join(relative)
+        }
+        var lines: [String] = []
+        var last: [String]?
+        for item in ordered {
+            if item.folder != last {
+                lines.append("[\(label(item.folder))]")
+                last = item.folder
+            }
+            lines += item.lines
+        }
+        let legend = root == nil ? "[folder] heads the notes below it." : "[folder] heads the notes below it, relative to \(rootPath); [.] is \(rootPath) itself."
+        return (legend, lines)
     }
 }
 
@@ -290,7 +316,9 @@ struct SearchTool: Tool {
         let window = try args.dateWindow(), createdWindow = try args.dateWindow("created")
         let order = try args.order()
         return try await notesResult {
-            let folderPath = try await folder.asyncMap { try await notes.repository.resolveFolder($0).path }
+            let resolved = try await folder.asyncMap { try await notes.repository.resolveFolder($0) }
+            let folderPath = resolved?.path
+            let namesByPath = Dictionary((try await notes.repository.folders()).map { ($0.path, $0.names) }, uniquingKeysWith: { a, _ in a })
             let paths = try await notes.repository.folderPathsByPrimaryKey()
             let deleted = await notes.repository.deletedHere
             var (total, hits) = try await notes.search.search(query, matchAll: matchAll, folderPath: folderPath, limit: limit + deleted.count, folderPaths: paths,
@@ -302,12 +330,20 @@ struct SearchTool: Tool {
             let scope = ranges.isEmpty ? "" : " (\(ranges.joined(separator: ", ")))"
             if hits.isEmpty { return "No notes match \"\(query)\"\(scope)." }
             let attachments = try await notes.search.attachmentKinds(noteIDs: Set(hits.map(\.id)))
-            var lines = ["\(total) notes match \"\(query)\"\(scope)\(total > hits.count ? ", showing \(hits.count)" : ""):"]
+            var lines = ["\(total) notes match \"\(query)\"\(scope)\(folderPath.map { " in \($0)" } ?? "")\(total > hits.count ? ", showing \(hits.count)" : ""):"]
+            var items: [(folder: [String], lines: [String])] = []
             for hit in hits {
                 let date = day(order == .created ? hit.created : hit.modified)
-                lines.append("\(ShortID.of(hit.id)) | \(listTitle(hit.title)) | \(hit.folderPath) | \(date) | \(sizeLabel(characters: hit.length, attachments: attachments[hit.id] ?? [:]))")
-                lines.append("  \(hit.snippet)")
+                items.append((namesByPath[hit.folderPath] ?? FolderPath.split(hit.folderPath), [
+                    "\(ShortID.of(hit.id)) | \(listTitle(hit.title)) | \(date) | \(sizeLabel(characters: hit.length, attachments: attachments[hit.id] ?? [:]))",
+                    "  \(hit.snippet)",
+                ]))
             }
+            // Ranked by relevance, folders are grouped by their best hit; with an explicit sort,
+            // the order is kept.
+            let sections = FolderSections.render(items, root: resolved?.names, rootPath: folderPath ?? "", group: order == nil)
+            if let legend = sections.legend { lines.append(legend) }
+            lines += sections.lines
             return lines.joined(separator: "\n")
         }
     }
