@@ -75,12 +75,23 @@ public final class NotesRepository {
     public func cloudState(id: String) throws(NotesError) -> CloudState {
         let store = try store()
         store.refresh()
-        guard let state = try send(store.note(id: id), "cloudState") as? NSObject else {
+        let note = try store.note(id: id)
+        guard let state = try send(note, "cloudState") as? NSObject else {
             throw .frameworkChanged("ICNote has no cloudState")
         }
-        return CloudState(
-            local: (state.value(forKey: "currentLocalVersion") as? Int) ?? 0,
-            synced: (state.value(forKey: "latestVersionSyncedToCloud") as? Int) ?? 0)
+        func versions(_ state: NSObject?) -> (Int, Int) {
+            ((state?.value(forKey: "currentLocalVersion") as? Int) ?? 0, (state?.value(forKey: "latestVersionSyncedToCloud") as? Int) ?? 0)
+        }
+        var pendingTables = 0
+        for case let attachment as NSManagedObject in (note.value(forKey: "attachments") as? Set<NSManagedObject>) ?? []
+        where attachment.value(forKey: "typeUTI") as? String == "com.apple.notes.table"
+            && (attachment.value(forKey: "markedForDeletion") as? Bool) != true
+        {
+            let (local, synced) = versions(try send(attachment, "cloudState") as? NSObject)
+            if synced < local { pendingTables += 1 }
+        }
+        let (local, synced) = versions(state)
+        return CloudState(local: local, synced: synced, pendingTables: pendingTables)
     }
 
     func syncTarget(id: String) throws(NotesError) -> SyncTarget {
@@ -123,6 +134,8 @@ public final class NotesRepository {
             // Drop in-memory edits right away so Notes' autosave cannot persist half a write.
             writer.context.rollback()
             writer.context.refresh(note, mergeChanges: false)
+            // Refreshing reloads each table's model, dropping in-memory cell edits (verified).
+            for attachment in edit.editedTables { writer.context.refresh(attachment, mergeChanges: false) }
             throw error
         }
         return try verify(id: id, target: target)
@@ -245,6 +258,27 @@ public final class NotesRepository {
         let found = (string.string as NSString).range(of: text)
         guard found.location != NSNotFound else { throw .notFound("text \(text)") }
         return string.attributes(at: found.location, effectiveRange: nil).keys.map(\.rawValue).sorted()
+    }
+
+    /// The id of the note's first table attachment.
+    public func diagnosticTableID(id: String) throws(NotesError) -> String? {
+        for case .table(let table) in try blocks(id: id) { return table.id }
+        return nil
+    }
+
+    /// Makes one table cell bold through Notes' write context, as editing in Notes would.
+    public func diagnosticBoldTableCell(tableID: String, text: String) throws(NotesError) {
+        let writer = try writer()
+        try TableEditor(attachmentID: tableID, context: writer.context).diagnosticBold(text)
+        try writer.save()
+    }
+
+    /// TTHints of a table cell, read through the read-only store.
+    public func diagnosticTableCellHints(tableID: String, text: String) throws(NotesError) -> Int? {
+        let store = try store()
+        store.refresh()
+        try Loader.startSharedContext()
+        return try TableEditor(attachmentID: tableID, context: store.context).diagnosticHints(text)
     }
 
     public func modificationDate(id: String) throws(NotesError) -> Date { try note(id: id).modified }

@@ -14,14 +14,18 @@ enum Loader {
     static let required: [(class: String, classMethods: [String], instanceMethods: [String])] = [
         ("ICPersistentContainer", ["managedObjectModel", "standardStoreOptions"], []),
         ("ICNote", [], ["mergeableString"]),
+        ("ICAttachmentTableModel", [], ["table", "setMergeableDataDirty:", "writeMergeableData"]),
+        ("ICTable", [], ["stringForColumnIndex:rowIndex:", "mergeableStringForColumnID:rowID:", "setAttributedString:columnIndex:rowIndex:",
+                         "identifierForColumnAtIndex:", "identifierForRowAtIndex:", "insertRowAtIndex:", "removeRowAtIndex:",
+                         "insertColumnAtIndex:", "removeColumnAtIndex:"]),
     ]
 
     /// Core Data properties are generated at runtime, so they are checked against the
     /// model's entities rather than with respondsToSelector.
     static let requiredProperties: [String: [String]] = [
-        "ICNote": ["identifier", "title", "folder", "modificationDate", "markedForDeletion", "isPasswordProtected"],
+        "ICNote": ["identifier", "title", "folder", "modificationDate", "markedForDeletion", "isPasswordProtected", "attachments"],
         "ICInlineAttachment": ["identifier", "altText", "tokenContentIdentifier"],
-        "ICAttachment": ["identifier"],
+        "ICAttachment": ["identifier", "typeUTI", "markedForDeletion", "mergeableData"],
         "ICFolder": ["identifier", "title"],
     ]
 

@@ -29,6 +29,16 @@ NS_ASSUME_NONNULL_BEGIN
 + (BOOL)send:(id)target selector:(NSString *)selector boolean:(BOOL)flag result:(id _Nullable * _Nonnull)result error:(NSError **)error;
 /// [[cls alloc] <selector>object boolean], e.g. -[ICTTTodo initWithIdentifier:done:].
 + (BOOL)allocClass:(NSString *)className initSelector:(NSString *)selector object:(id)argument boolean:(BOOL)flag result:(id _Nullable * _Nonnull)result error:(NSError **)error;
+/// Object-returning send with one NSUInteger, e.g. -[CRTable identifierForRowAtIndex:].
++ (BOOL)send:(id)target selector:(NSString *)selector unsignedInteger:(NSUInteger)value result:(id _Nullable * _Nonnull)result error:(NSError **)error;
+/// Object-returning send with two object arguments, e.g. -[ICTable mergeableStringForColumnID:rowID:].
++ (BOOL)send:(id)target selector:(NSString *)selector object:(id)first object:(id)second result:(id _Nullable * _Nonnull)result error:(NSError **)error;
+/// Void send with an object and two NSUIntegers, e.g. -[ICTable setAttributedString:columnIndex:rowIndex:].
++ (BOOL)send:(id)target selector:(NSString *)selector object:(id)argument unsignedInteger:(NSUInteger)first unsignedInteger:(NSUInteger)second error:(NSError **)error;
+/// Void send with one BOOL, e.g. -[ICAttachmentModel setMergeableDataDirty:].
++ (BOOL)send:(id)target selector:(NSString *)selector boolean:(BOOL)flag error:(NSError **)error;
+/// Void send with one object, e.g. -[ICCloudSyncingObject updateChangeCountWithReason:].
++ (BOOL)send:(id)target selector:(NSString *)selector object:(id)argument error:(NSError **)error;
 /// Supplies -[NSMutableAttributedString ic_convertParagraphStyleToBodyInRange:], which
 /// -[ICNote addTableAttachmentWithText:] calls. Notes gets it from NotesEditor.framework, but
 /// loading that framework makes later mid-note edits save a truncated body, so NotesKit

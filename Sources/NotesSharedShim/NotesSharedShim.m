@@ -101,6 +101,42 @@ static SEL ShimSelector(id target, NSString *name, NSError **error) {
     return ok;
 }
 
++ (BOOL)send:(id)target selector:(NSString *)selector unsignedInteger:(NSUInteger)argument result:(id _Nullable * _Nonnull)result error:(NSError **)error {
+    SEL sel = ShimSelector(target, selector, error);
+    if (!sel) return NO;
+    __block id value = nil;
+    BOOL ok = [self performBlock:^{ value = ((id (*)(id, SEL, NSUInteger))objc_msgSend)(target, sel, argument); } error:error];
+    *result = value;
+    return ok;
+}
+
++ (BOOL)send:(id)target selector:(NSString *)selector object:(id)first object:(id)second result:(id _Nullable * _Nonnull)result error:(NSError **)error {
+    SEL sel = ShimSelector(target, selector, error);
+    if (!sel) return NO;
+    __block id value = nil;
+    BOOL ok = [self performBlock:^{ value = ((id (*)(id, SEL, id, id))objc_msgSend)(target, sel, first, second); } error:error];
+    *result = value;
+    return ok;
+}
+
++ (BOOL)send:(id)target selector:(NSString *)selector object:(id)argument unsignedInteger:(NSUInteger)first unsignedInteger:(NSUInteger)second error:(NSError **)error {
+    SEL sel = ShimSelector(target, selector, error);
+    if (!sel) return NO;
+    return [self performBlock:^{ ((void (*)(id, SEL, id, NSUInteger, NSUInteger))objc_msgSend)(target, sel, argument, first, second); } error:error];
+}
+
++ (BOOL)send:(id)target selector:(NSString *)selector boolean:(BOOL)flag error:(NSError **)error {
+    SEL sel = ShimSelector(target, selector, error);
+    if (!sel) return NO;
+    return [self performBlock:^{ ((void (*)(id, SEL, BOOL))objc_msgSend)(target, sel, flag); } error:error];
+}
+
++ (BOOL)send:(id)target selector:(NSString *)selector object:(id)argument error:(NSError **)error {
+    SEL sel = ShimSelector(target, selector, error);
+    if (!sel) return NO;
+    return [self performBlock:^{ ((void (*)(id, SEL, id))objc_msgSend)(target, sel, argument); } error:error];
+}
+
 + (BOOL)allocClass:(NSString *)className initSelector:(NSString *)selector object:(id)argument boolean:(BOOL)flag result:(id _Nullable * _Nonnull)result error:(NSError **)error {
     Class cls = NSClassFromString(className);
     SEL sel = NSSelectorFromString(selector);

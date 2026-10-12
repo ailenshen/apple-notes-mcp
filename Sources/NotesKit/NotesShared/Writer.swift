@@ -26,6 +26,8 @@ final class Writer {
     /// Real table attachments made before the editing session opens, in insertion order.
     /// Creating one inside beginEditing/endEditing leaves the saved body truncated.
     private var preparedTables: [NSObject] = []
+    /// Table attachments edited in place, so a failed write can refresh them.
+    private(set) var editedTables: [NSManagedObject] = []
 
     static let styleKey = NSAttributedString.Key("TTStyle")
     static let hintsKey = NSAttributedString.Key("TTHints")
@@ -75,6 +77,13 @@ final class Writer {
         dryRun = false
         pendingTables = [:]
         working = NSMutableAttributedString(attributedString: original)
+        // Tables changed in place live in their own attachment documents, outside the body's
+        // editing session; each is checked against its target rows before anything is saved.
+        for case .modifyTable(_, let from, let to) in script {
+            let editor = try TableEditor(attachmentID: from.id, context: context)
+            editedTables.append(editor.attachment)
+            try editor.apply(to.rows)
+        }
         for case .insert(_, let blocks) in script {
             for case .table(let table) in blocks { preparedTables.append(try makeTable(table)) }
         }
@@ -99,12 +108,15 @@ final class Writer {
                 try insertLines(blocks, at: line)
             case .modify(let line, let from, let to):
                 try modifyParagraph(line: line, from: from, to: to, attachments: attachments)
+            case .modifyTable(_, let from, let to):
+                // The body keeps the same attachment; the rehearsal reads the target rows.
+                if dryRun { pendingTables[from.id] = to.rows }
             }
         }
     }
 
     /// Attachments are kept as opaque placeholders: an edit may move them but must not drop
-    /// them or invent new ones. Tables are the exception, since they are rebuilt from Markdown.
+    /// them or invent new ones. Tables are the exception: Markdown can add, edit and remove them.
     func checkAttachments(old: [Block], new: [Block]) throws(NotesError) {
         func ids(_ blocks: [Block]) -> [String: String] {
             var out: [String: String] = [:]
@@ -128,6 +140,8 @@ final class Writer {
         case delete(line: Int, Block)
         case insert(line: Int, [Block])
         case modify(line: Int, from: Paragraph, to: Paragraph)
+        /// A table edited in place: same attachment, cells brought to the new rows.
+        case modifyTable(line: Int, from: Table, to: Table)
     }
 
     /// Block-level diff (common prefix/suffix, then LCS on the middle). Unmatched runs pair
@@ -192,6 +206,8 @@ final class Writer {
                 switch (a[oldRange.lowerBound + k], b[newRange.lowerBound + k]) {
                 case (.paragraph(let from), .paragraph(let to)):
                     hunkOps.append(.modify(line: line, from: from, to: to))
+                case (.table(let from), .table(let to)) where !from.id.isEmpty:
+                    hunkOps.append(.modifyTable(line: line, from: from, to: to))
                 case (let from, let to):
                     hunkOps.append(.insert(line: line + 1, [to]))
                     hunkOps.append(.delete(line: line, from))
@@ -614,9 +630,8 @@ final class Writer {
         return marker
     }
 
-    /// A table rebuilt from Markdown replaces the old one; the old attachment is marked for
-    /// deletion the way Notes does when a table is removed.
-    /// 当找到持久化 ICTable 单元格修改的方法时，改为原地修改单元格，保留单元格内的格式。
+    /// A table that is removed (not edited: see TableEditor) is marked for deletion the way
+    /// Notes does it.
     func markAttachmentDeleted(_ id: String) throws(NotesError) {
         guard !id.isEmpty else { return }
         let request = NSFetchRequest<NSManagedObject>(entityName: "ICAttachment")

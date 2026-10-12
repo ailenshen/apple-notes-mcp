@@ -207,6 +207,23 @@ func writeTest() async {
         if let mismatch = outcome.mismatch { return mismatch }
         return outcome.title == "\(title) renamed" ? nil : "title is \(outcome.title)"
     }
+    await step("table edited in place keeps cell formatting") {
+        guard let tableID = try repository.diagnosticTableID(id: id) else { return "no table" }
+        try repository.diagnosticBoldTableCell(tableID: tableID, text: "Alice")
+        let outcome = try repository.update(id: id, expectedVersion: nil) { blocks throws(NotesError) in
+            MarkdownParser.parse(MarkdownRenderer.render(blocks)
+                .replacingOccurrences(of: "| Name | Score |\n| --- | --- |\n| Alice | 90 |",
+                                      with: "| Name | Score | Grade |\n| --- | --- | --- |\n| Alice Smith | 95 | A |\n| Bob | 80 | B |"))
+        }
+        if let mismatch = outcome.mismatch { return mismatch }
+        guard try repository.diagnosticTableID(id: id) == tableID else { return "the table was rebuilt instead of edited" }
+        let hints = try repository.diagnosticTableCellHints(tableID: tableID, text: "Alice")
+        return hints.map { $0 & 1 == 1 } == true ? nil : "bold lost in the edited cell (TTHints \(hints.map(String.init) ?? "none"))"
+    }
+    await step("table edit uploads to iCloud (note and table)") {
+        let report = try await sync.settle(id: id)
+        return report.synced ? nil : "not synced after \(report.total): \(report.state)"
+    }
     await step("removing an attachment-free table and full replace") {
         let replacement = MarkdownParser.parse("""
             # \(title) replaced
