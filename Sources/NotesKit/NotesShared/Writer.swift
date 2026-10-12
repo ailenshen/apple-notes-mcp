@@ -62,8 +62,22 @@ final class Writer {
     func apply(_ target: [Block]) throws(NotesError) {
         let old = try Reader(context: context).blocks(original)
         try checkAttachments(old: old, new: target)
+        try execute(Self.editScript(old: old, new: target), target: target)
+    }
+
+    /// Replaces the given tables with new ones of the same content (see
+    /// NotesRepository.rebuildTables). `blocks` is the note as it reads now.
+    func rebuild(tables ids: Set<String>, in blocks: [Block]) throws(NotesError) {
+        var script: [Op] = []
+        for (line, block) in blocks.enumerated().reversed() {
+            guard case .table(let table) = block, ids.contains(table.id) else { continue }
+            script += [.insert(line: line + 1, [block]), .delete(line: line, block)]
+        }
+        try execute(script, target: blocks)
+    }
+
+    private func execute(_ script: [Op], target: [Block]) throws(NotesError) {
         let attachmentAttributes = Self.attachmentAttributes(in: original)
-        let script = Self.editScript(old: old, new: target)
         if script.isEmpty { return }
 
         // Rehearse on the mirror and check the result before touching the note.

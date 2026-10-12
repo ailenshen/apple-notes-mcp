@@ -4,10 +4,24 @@ import NotesKit
 
 /// Waits for the iCloud upload and describes the outcome of a write.
 func writeReport(_ verb: String, _ outcome: WriteOutcome, notes: NotesContext) async throws -> ToolResult {
-    let sync = try await notes.sync.settle(id: outcome.id)
-    let cloud = sync.synced
+    var outcome = outcome
+    var sync = try await notes.sync.settle(id: outcome.id)
+    var rebuilt = false
+    // A table edited in place that does not upload (it was edited in Notes itself during this
+    // Notes session) is rebuilt, so the change still reaches other devices.
+    let stuck = Set(sync.state.pendingTables).intersection(outcome.tablesEditedInPlace)
+    if !sync.synced, sync.state.noteSynced, !stuck.isEmpty {
+        let again = try await notes.repository.rebuildTables(id: outcome.id, tableIDs: stuck)
+        outcome = WriteOutcome(id: again.id, version: again.version, title: again.title, mismatch: outcome.mismatch ?? again.mismatch)
+        sync = try await notes.sync.settle(id: outcome.id)
+        rebuilt = true
+    }
+    var cloud = sync.synced
         ? "uploaded to iCloud"
         : "saved on this Mac; iCloud has not taken it yet (Notes will upload it later)"
+    if rebuilt {
+        cloud += "; the edited table was rebuilt so iCloud would take it, which reset formatting inside its cells"
+    }
     var text = "\(verb) \"\(outcome.title)\". id: \(outcome.id) | version: \(outcome.version) | \(cloud)."
     if let mismatch = outcome.mismatch {
         text += "\nWarning: the note does not read back exactly as written — \(mismatch). Read it again before further edits."

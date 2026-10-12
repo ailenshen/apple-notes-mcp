@@ -82,13 +82,13 @@ public final class NotesRepository {
         func versions(_ state: NSObject?) -> (Int, Int) {
             ((state?.value(forKey: "currentLocalVersion") as? Int) ?? 0, (state?.value(forKey: "latestVersionSyncedToCloud") as? Int) ?? 0)
         }
-        var pendingTables = 0
+        var pendingTables: [String] = []
         for case let attachment as NSManagedObject in (note.value(forKey: "attachments") as? Set<NSManagedObject>) ?? []
         where attachment.value(forKey: "typeUTI") as? String == "com.apple.notes.table"
             && (attachment.value(forKey: "markedForDeletion") as? Bool) != true
         {
             let (local, synced) = versions(try send(attachment, "cloudState") as? NSObject)
-            if synced < local { pendingTables += 1 }
+            if synced < local, let tableID = attachment.value(forKey: "identifier") as? String { pendingTables.append(tableID) }
         }
         let (local, synced) = versions(state)
         return CloudState(local: local, synced: synced, pendingTables: pendingTables)
@@ -138,7 +138,37 @@ public final class NotesRepository {
             for attachment in edit.editedTables { writer.context.refresh(attachment, mergeChanges: false) }
             throw error
         }
-        return try verify(id: id, target: target)
+        var outcome = try verify(id: id, target: target)
+        outcome.tablesEditedInPlace = edit.editedTables.compactMap { $0.value(forKey: "identifier") as? String }
+        return outcome
+    }
+
+    /// Rebuilds the given tables of a note with the same content: new table attachments
+    /// replace them, and the old ones are marked for deletion.
+    ///
+    /// This is the fallback when a table edited in place does not upload. That happens after
+    /// the table was edited in Notes itself during this Notes session (verified 2026-10-12):
+    /// Notes keeps its own in-memory copy of the table's sync state, so it does not see that our
+    /// version still needs uploading. A new attachment has no such copy, so it uploads like any
+    /// new table. Formatting inside the rebuilt cells is lost.
+    /// 当找到让 Notes 重新读取表格同步状态的安全方法（或官方 API）时，删除这个兜底重建。
+    public func rebuildTables(id: String, tableIDs: Set<String>) throws(NotesError) -> WriteOutcome {
+        let writer = try writer()
+        let note = try writer.note(id: id)
+        writer.context.refresh(note, mergeChanges: false)
+        try guardWritable(note)
+        let edit = try Writer(note: note, context: writer.context)
+        let blocks = try Reader(context: writer.context).blocks(try edit.current)
+        try backup(note, id: id)
+        do {
+            try edit.rebuild(tables: tableIDs, in: blocks)
+            try writer.save()
+        } catch {
+            writer.context.rollback()
+            writer.context.refresh(note, mergeChanges: false)
+            throw error
+        }
+        return try verify(id: id, target: blocks)
     }
 
     /// Creates a note in a folder (default: the iCloud "Notes" folder) with the given body.

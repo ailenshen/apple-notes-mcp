@@ -13,7 +13,9 @@ public final class SyncCoordinator {
     }
 
     /// Nudges the upload, then polls the note's cloud state until it reports synced.
-    public func settle(id: String, timeout: Duration = .seconds(20)) async throws(NotesError) -> SyncReport {
+    /// Tables upload with the note when they upload at all (verified 2026-10-12), so once the
+    /// note is up, tables still pending after `tableGrace` are reported instead of waited for.
+    public func settle(id: String, timeout: Duration = .seconds(20), tableGrace: Duration = .seconds(8)) async throws(NotesError) -> SyncReport {
         let clock = ContinuousClock()
         let start = clock.now
         let target = try repository.syncTarget(id: id)
@@ -21,10 +23,15 @@ public final class SyncCoordinator {
         try AppleScript.run(
             "tell application \"Notes\" to move note id \"\(target.noteURI)\" to folder id \"\(target.folderURI)\"")
         let nudged = clock.now - start
+        var noteSyncedAt: ContinuousClock.Instant?
         while true {
             let state = try repository.cloudState(id: id)
             if state.isSynced {
                 return SyncReport(synced: true, nudge: nudged, total: clock.now - start, state: state)
+            }
+            if state.noteSynced, noteSyncedAt == nil { noteSyncedAt = clock.now }
+            if let noteSyncedAt, clock.now - noteSyncedAt >= tableGrace {
+                return SyncReport(synced: false, nudge: nudged, total: clock.now - start, state: state)
             }
             if clock.now - start >= timeout {
                 return SyncReport(synced: false, nudge: nudged, total: clock.now - start, state: state)

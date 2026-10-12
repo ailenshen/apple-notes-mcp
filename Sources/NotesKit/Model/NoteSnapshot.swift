@@ -49,10 +49,12 @@ public enum NotesError: Error, Sendable, Equatable, CustomStringConvertible {
 public struct CloudState: Sendable, Equatable {
     public var local: Int
     public var synced: Int
-    /// Table attachments of the note whose own latest version is not uploaded yet. Tables
-    /// edited in place change only their attachment, which syncs as a separate record.
-    public var pendingTables: Int = 0
-    public var isSynced: Bool { synced >= local && pendingTables == 0 }
+    /// Ids of the note's table attachments whose latest version is not uploaded yet. A table
+    /// edited in place changes only its attachment, which syncs as a separate record.
+    public var pendingTables: [String] = []
+    /// The note record itself is uploaded (tables aside).
+    public var noteSynced: Bool { synced >= local }
+    public var isSynced: Bool { noteSynced && pendingTables.isEmpty }
 }
 
 /// AppleScript ids (x-coredata URIs) of a note and its folder, used to nudge the upload.
@@ -68,6 +70,8 @@ public struct WriteOutcome: Sendable {
     public var version: String
     public var title: String
     public var mismatch: String?
+    /// Table attachments this write edited in place (see TableEditor).
+    public var tablesEditedInPlace: [String] = []
 
     public init(id: String, version: String, title: String, mismatch: String?) {
         self.id = id
