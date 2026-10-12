@@ -84,6 +84,33 @@ public final class NotesRepository {
             .sorted { $0.modified > $1.modified }
     }
 
+    /// The full id of a note given its id or an id prefix (as lists show it).
+    public func resolveNoteID(_ reference: String) throws(NotesError) -> String {
+        try resolveID(reference, entities: ["ICNote"], what: "note")
+    }
+
+    /// The full id of an attachment given its id or an id prefix.
+    public func resolveAttachmentID(_ reference: String) throws(NotesError) -> String {
+        try resolveID(reference, entities: ["ICAttachment", "ICInlineAttachment"], what: "attachment")
+    }
+
+    private func resolveID(_ reference: String, entities: [String], what: String) throws(NotesError) -> String {
+        let wanted = reference.trimmingCharacters(in: .whitespaces)
+        let store = try store()
+        var matches: [String] = []
+        for entity in entities {
+            if try !fetch(store, entity, NSPredicate(format: "identifier == %@", wanted)).isEmpty { return wanted }
+            guard wanted.count >= 6 else { continue }
+            matches += try fetch(store, entity, NSPredicate(format: "identifier BEGINSWITH[c] %@", wanted))
+                .compactMap { $0.value(forKey: "identifier") as? String }
+        }
+        switch Set(matches).count {
+        case 1: return matches[0]
+        case 0: throw .notFound("\(what) \(reference)")
+        default: throw .refused("\(reference) matches several \(what)s: \(Set(matches).sorted().joined(separator: ", ")); use the full id")
+        }
+    }
+
     public func cloudState(id: String) throws(NotesError) -> CloudState {
         let store = try store()
         store.refresh()
@@ -134,7 +161,8 @@ public final class NotesRepository {
         if let expectedVersion, expectedVersion != currentVersion {
             throw .conflict("the note changed after you read it (version \(currentVersion), you had \(expectedVersion)); read it again")
         }
-        let target = try transform(currentBlocks)
+        // The model sees attachment ids shortened (see ShortID); map them back first.
+        let target = try transform(currentBlocks).expandingAttachmentIDs(from: currentBlocks)
         if let prefix = writeGuardTitlePrefix, !Self.firstLine(target).hasPrefix(prefix) {
             throw .refused("refusing to write: the title must keep starting with \"\(prefix)\" while the write guard is on")
         }
@@ -416,6 +444,8 @@ public final class NotesRepository {
     public func resolveFolder(_ reference: String) throws(NotesError) -> FolderSnapshot {
         let all = try folders()
         if let byID = all.first(where: { $0.id == reference }) { return byID }
+        let byPrefix = all.filter { ShortID.of($0.id) == reference }
+        if byPrefix.count == 1 { return byPrefix[0] }
         let wanted = reference.trimmingCharacters(in: CharacterSet(charactersIn: "/ ")).lowercased()
         let exact = all.filter { $0.path.lowercased() == wanted }
         if exact.count == 1 { return exact[0] }

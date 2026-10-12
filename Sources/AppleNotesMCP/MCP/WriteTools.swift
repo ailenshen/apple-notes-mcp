@@ -22,7 +22,7 @@ func writeReport(_ verb: String, _ outcome: WriteOutcome, notes: NotesContext) a
     if rebuilt {
         cloud += "; the edited table was rebuilt so iCloud would take it, which reset formatting inside its cells"
     }
-    var text = "\(verb) \"\(outcome.title)\". id: \(outcome.id) | version: \(outcome.version) | \(cloud)."
+    var text = "\(verb) \"\(outcome.title)\". id: \(ShortID.of(outcome.id)) | version: \(outcome.version) | \(cloud)."
     if let mismatch = outcome.mismatch {
         text += "\nWarning: the note does not read back exactly as written — \(mismatch). Read it again before further edits."
         return ToolResult(text, isError: true)
@@ -87,13 +87,14 @@ struct AppendToNoteTool: Tool {
 
     func call(_ arguments: [String: JSONValue]) async throws -> ToolResult {
         let args = Arguments(arguments)
-        let id = try args.string("id")
+        let ref = try args.string("id")
         let addition = trimmedBlocks(try args.string("markdown"))
         let atStart = try args.choice("position", ["end", "start"], default: "end") == "start"
         let heading = try args.optionalString("under_heading")
         let version = try args.optionalString("version")
         guard !addition.isEmpty else { throw MCPError.invalidParams("markdown must not be empty") }
         return try await writeResult {
+            let id = try await notes.repository.resolveNoteID(ref)
             let outcome = try await notes.repository.update(id: id, expectedVersion: version) { blocks throws(NotesError) in
                 var result = blocks
                 result.insert(contentsOf: addition, at: try insertionIndex(in: blocks, heading: heading, atStart: atStart))
@@ -155,15 +156,17 @@ struct EditNoteTool: Tool {
 
     func call(_ arguments: [String: JSONValue]) async throws -> ToolResult {
         let args = Arguments(arguments)
-        let id = try args.string("id")
+        let ref = try args.string("id")
         let old = try args.string("old_text")
         let new = try args.string("new_text")
         let all = try args.bool("replace_all", default: false)
         let version = try args.optionalString("version")
         guard !old.isEmpty else { throw MCPError.invalidParams("old_text must not be empty") }
         return try await writeResult {
+            let id = try await notes.repository.resolveNoteID(ref)
             let outcome = try await notes.repository.update(id: id, expectedVersion: version) { blocks throws(NotesError) in
-                let markdown = MarkdownRenderer.render(blocks)
+                // The same text read_note shows, short attachment ids included.
+                let markdown = MarkdownRenderer.render(blocks.mappingAttachmentIDs(ShortID.of))
                 let count = markdown.components(separatedBy: old).count - 1
                 if count == 0 { throw .notFound("old_text in the note. Closest line: \"\(closestLine(to: old, in: markdown))\"") }
                 if count > 1, !all { throw .refused("old_text appears \(count) times; add more context or set replace_all") }
@@ -202,11 +205,12 @@ struct UpdateNoteTool: Tool {
 
     func call(_ arguments: [String: JSONValue]) async throws -> ToolResult {
         let args = Arguments(arguments)
-        let id = try args.string("id")
+        let ref = try args.string("id")
         let blocks = trimmedBlocks(try args.string("markdown"))
         let version = try args.string("version")
         guard !blocks.isEmpty else { throw MCPError.invalidParams("markdown must not be empty; use delete_note to remove a note") }
         return try await writeResult {
+            let id = try await notes.repository.resolveNoteID(ref)
             let outcome = try await notes.repository.update(id: id, expectedVersion: version) { _ throws(NotesError) in blocks }
             return try await writeReport("Updated", outcome, notes: notes)
         }
@@ -222,8 +226,9 @@ struct DeleteNoteTool: Tool {
     let annotations = ToolAnnotations(destructive: true, idempotent: false)
 
     func call(_ arguments: [String: JSONValue]) async throws -> ToolResult {
-        let id = try Arguments(arguments).string("id")
+        let ref = try Arguments(arguments).string("id")
         return try await writeResult {
+            let id = try await notes.repository.resolveNoteID(ref)
             let note = try await notes.repository.note(id: id)
             try await notes.repository.delete(id: id)
             return ToolResult("Moved \"\(note.title)\" to Recently Deleted.")
@@ -245,13 +250,14 @@ struct MoveNoteTool: Tool {
 
     func call(_ arguments: [String: JSONValue]) async throws -> ToolResult {
         let args = Arguments(arguments)
-        let id = try args.string("id"), folder = try args.string("folder")
+        let ref = try args.string("id"), folder = try args.string("folder")
         let allowShared = try args.bool("allow_shared", default: false)
         return try await writeResult {
+            let id = try await notes.repository.resolveNoteID(ref)
             let moved = try await notes.repository.move(id: id, toFolder: folder, allowShared: allowShared)
             let sync = try await notes.sync.settle(id: id)
             let verb = moved.restored ? "Restored" : "Moved"
-            return ToolResult("\(verb) \"\(moved.title)\" from \(moved.from) to \(moved.to). id: \(id) | "
+            return ToolResult("\(verb) \"\(moved.title)\" from \(moved.from) to \(moved.to). id: \(ShortID.of(id)) | "
                 + (sync.synced ? "uploaded to iCloud." : "saved on this Mac; iCloud has not taken it yet (Notes will upload it later)."))
         }
     }

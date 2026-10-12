@@ -50,6 +50,17 @@ func unitChecks() {
     expect(lenient == [para(.subheading, [text("deep")]), para(.dash, [text("plus")]),
         para(.body, [text("bold ", .bold), text("both", [.bold, .italic]), text(" bold", .bold)]),
         para(.code, [text("code")])], "lenient parse: \(lenient)")
+    // Short attachment ids: what read_note shows, and what a write maps back.
+    let full = [para(.body, [text("pic "), .attachment(AttachmentRef(id: "4E847B23-CDE2-408A-9A26-4E8642E89BA3", kind: "image", label: "")),
+                             .attachment(AttachmentRef(id: "10A0BC5E-7917-4E06-B07D-EEECA1E9E9F7", kind: "image", label: ""))])]
+    let shown = MarkdownRenderer.render(full.mappingAttachmentIDs(ShortID.of))
+    expect(shown.contains("attachment:4E847B23)") && !shown.contains("CDE2"), "short ids in Markdown: \(shown)")
+    let written = MarkdownParser.parse(shown.replacingOccurrences(of: "pic ", with: "picture "))
+    let expanded = written.expandingAttachmentIDs(from: full)
+    expect(expanded.attachmentIDsForChecks == ["4E847B23-CDE2-408A-9A26-4E8642E89BA3", "10A0BC5E-7917-4E06-B07D-EEECA1E9E9F7"],
+           "short ids expand back: \(expanded)")
+    expect(MarkdownParser.parse("![image](attachment:FFFFFFFF)").expandingAttachmentIDs(from: full).attachmentIDsForChecks == ["FFFFFFFF"],
+           "an unknown short id is left for the writer to refuse")
     print(failures == 0 ? "unit: all passed" : "unit: \(failures) failed")
 }
 

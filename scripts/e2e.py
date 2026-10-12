@@ -32,39 +32,43 @@ def check(label, ok, detail=""):
     failures += not ok
 
 err, text = call("overview")
-check("overview lists folders", not err and "DefaultFolder-CloudKit" in text, text[:300])
+check("overview lists folders as a tree", not err and "\nNotes (" in text and "notes in" in text, text[:300])
 
 tag = uuid.uuid4().hex[:8]
 title = f"MCP Test e2e {tag}"
 err, text = call("create_note", markdown=f"# {title}\nFirst line with **bold** and zebra{tag}.\n\n## Tasks\n- [ ] one\n\n## Notes\nEnd.")
 check("create_note", not err and "uploaded to iCloud" in text, text)
-note_id = re.search(r"id: ([0-9A-F-]{36})", text).group(1) if not err else ""
+# Results show 8-character id prefixes, and every tool accepts them.
+note_id = re.search(r"id: ([0-9A-F]{8})\b", text).group(1) if not err else ""
+short = note_id
 
 err, text = call("search", query=f"zebra{tag}")
-check("search finds the new note", not err and note_id in text, text)
+check("search finds the new note", not err and short in text, text)
 
 err, text = call("read_note", title=title.upper())
-check("read_note by title, ignoring case", not err and f"id: {note_id}" in text, text[:200])
+check("read_note by title, ignoring case", not err and f"id: {short}" in text, text[:200])
+err, text = call("read_note", ids=[note_id, "MCP-missing-id"])
+check("read_note reads several ids, reporting a missing one", not err and f"id: {short}" in text and "MCP-missing-id" in text, text[:300])
 err, text = call("read_note", title=title + " missing")
 check("read_note by a title nobody has", not err and "No note is titled" in text, text)
 err, text = call("read_note", id=note_id)
 version = re.search(r"version: (\w+)", text).group(1) if not err else ""
-check("read_note returns Markdown and asks for a description", not err and "**bold**" in text and "describe_note" in text, text)
+check("read_note returns Markdown and flags a missing description", not err and "**bold**" in text and "needs description" in text, text)
 
 import datetime
 today = datetime.date.today().isoformat()
 err, text = call("overview", modified_after=today, sort="modified", limit=500)
-check("overview lists today's notes across folders, with sizes", not err and note_id in text and " chars" in text, text[:300])
+check("overview lists today's notes across folders, with sizes", not err and short in text and " chars" in text, text[:300])
 err, text = call("overview", created_after=today)
-check("overview created-date filter", not err and note_id in text and "created since" in text, text[:200])
+check("overview created-date filter", not err and short in text and "created since" in text, text[:200])
 err, text = call("overview", modified_before="2000-01-01")
-check("overview date filter excludes newer notes", not err and note_id not in text, text[:200])
+check("overview date filter excludes newer notes", not err and short not in text, text[:200])
 err, text = call("search", query=f"zebra{tag}", modified_after=today, sort="title")
-check("search with a date filter and sort", not err and note_id in text and " chars" in text, text[:300])
+check("search with a date filter and sort", not err and short in text and " chars" in text, text[:300])
 err, text = call("search", query=f"zebra{tag}", modified_before=today)
 check("search date filter excludes today's note", not err and "No notes match" in text, text[:200])
 err, text = call("overview", undescribed=True, limit=200)
-check("overview lists undescribed notes with their text", not err and note_id in text and "describe_note" in text, text[:300])
+check("overview lists undescribed notes with their text", not err and short in text and "describe_note" in text, text[:300])
 err, text = call("describe_note", descriptions=[{"id": note_id, "description": "End-to-end test note"},
                                                  {"id": "00000000-0000-0000-0000-000000000000", "description": "missing"}])
 check("describe_note saves one and reports the missing one", not err and "Saved the description" in text and "Not saved" in text, text)

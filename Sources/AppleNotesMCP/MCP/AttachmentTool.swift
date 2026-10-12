@@ -40,8 +40,8 @@ struct ReadAttachmentTool: Tool {
         let id = try args.string("id")
         let textOnly = try args.bool("text_only", default: false)
         return try await writeResult {
-            let info = try await notes.repository.attachment(id: id)
-            var lines = ["\(info.kind)\(info.title.isEmpty ? "" : " \"\(info.title)\"") in note \"\(info.noteTitle)\" (\(info.noteID))"
+            let info = try await notes.repository.attachment(id: try await notes.repository.resolveAttachmentID(id))
+            var lines = ["\(info.kind)\(info.title.isEmpty ? "" : " \"\(info.title)\"") in note \"\(info.noteTitle)\" (\(ShortID.of(info.noteID)))"
                 + (info.fileSize > 0 ? " | \(ByteCountFormatter.string(fromByteCount: Int64(info.fileSize), countStyle: .file))" : "")]
             var extra: [ContentBlock] = []
             func addText(_ label: String, _ text: String) {

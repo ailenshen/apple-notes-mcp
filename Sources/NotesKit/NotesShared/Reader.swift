@@ -130,7 +130,7 @@ struct Reader {
     /// can open it with read_note.
     static func noteLinkLabel(_ alt: String, token: String) -> String {
         guard let path = token.split(separator: "?").first, path.hasPrefix("applenotes:note/") else { return alt }
-        return alt + " → " + path.dropFirst("applenotes:note/".count).uppercased()
+        return alt + " → " + ShortID.of(path.dropFirst("applenotes:note/".count).uppercased())
     }
 
     private func fetch(_ entity: String, id: String) throws(NotesError) -> NSManagedObject? {

@@ -19,6 +19,8 @@ TASKS = {
     "baseline": "Reply with the single word OK. Do not call any tools.",
     "overview": "How many notes do I have in total, and which three folders hold the most notes? Answer in one line.",
     "find": "Find my note titled '{find}' and list the kinds of formatting it uses (headings, lists, tables and so on). Be brief.",
+    # The Claude Projects pattern: instructions point at one folder to read.
+    "folder": "My folder '{folder}' is relevant here: read all of its notes, then summarize what the folder covers in one short paragraph.",
     "write": (
         "Create a note titled 'MCP Test Bench' containing: a heading 'Tasks' with checklist items milk, eggs "
         "and bread; a heading 'Notes' with one bullet 'first'; and a table with header Item | Qty and one row "
@@ -61,6 +63,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("servers", nargs="+", help="name='command' pairs")
     parser.add_argument("--find", default="MCP Test Visual")
+    parser.add_argument("--folder", default="Projects")
     parser.add_argument("--reps", type=int, default=2)
     parser.add_argument("--tasks", default=",".join(TASKS))
     parser.add_argument("--out", default="bench-results.json")
@@ -71,7 +74,7 @@ def main() -> None:
         for task in args.tasks.split(","):
             for rep in range(args.reps):
                 for name, command in servers.items():  # interleaved, so drift hits both alike
-                    r = run(command, TASKS[task].format(find=args.find), workdir)
+                    r = run(command, TASKS[task].format(find=args.find, folder=args.folder), workdir)
                     r.update(server=name, task=task, rep=rep)
                     results.append(r)
                     print(json.dumps({k: v for k, v in r.items() if k != "result"}), flush=True)

@@ -75,7 +75,7 @@ struct OverviewTool: Tool {
     let notes: NotesContext
     let name = "overview"
     let title: String? = "Overview of notes"
-    let description = "Folders with note counts. With folder, dates or sort: notes as id | title | date | size | description. undescribed: true lists notes still needing a description."
+    let description = "Folders with note counts. With folder, dates or sort: notes as id | title | date | size | description. undescribed: true lists notes needing a description."
     let inputSchema = schema([
         "folder": stringProperty("Path, such as \"Projects/Ideas\", or id"),
         "modified_after": stringProperty("YYYY-MM-DD, inclusive"),
@@ -84,7 +84,7 @@ struct OverviewTool: Tool {
         "created_before": stringProperty("YYYY-MM-DD, exclusive"),
         "sort": sortProperty("Newest first by modified (default) or created, or by title"),
         "undescribed": ["type": "boolean", "description": "Only notes needing a description, with their opening text"],
-        "limit": ["type": "integer", "minimum": 1, "maximum": 500, "description": "Default 100 (50 with undescribed)"],
+        "limit": ["type": "integer", "minimum": 1, "maximum": 500, "description": "Default 30 (50 with undescribed)"],
     ])
     let annotations = ToolAnnotations.readOnly
 
@@ -94,7 +94,7 @@ struct OverviewTool: Tool {
         let undescribed = try args.bool("undescribed", default: false)
         let window = try args.dateWindow(), createdWindow = try args.dateWindow("created")
         let order = try args.order()
-        let limit = try args.int("limit", default: undescribed ? 50 : 100, range: 1...500)
+        let limit = try args.int("limit", default: undescribed ? 50 : 30, range: 1...500)
         return try await notesResult {
             let descriptions = try await notes.index.all()
             if folder != nil || undescribed || !window.isEmpty || !createdWindow.isEmpty || order != nil {
@@ -106,11 +106,29 @@ struct OverviewTool: Tool {
             for note in try await notes.repository.notes(inFolders: nil) where notes.isFresh(descriptions[note.id], modified: note.modified) {
                 described[note.folderID, default: 0] += 1
             }
-            var lines = ["path | id | notes | described"]
-            for f in folders { lines.append("\(f.path) | \(f.id) | \(f.noteCount) | \(described[f.id] ?? 0)") }
-            lines.append("\(folders.reduce(0) { $0 + $1.noteCount }) notes in \(folders.count) folders")
-            return lines.joined(separator: "\n")
+            return folderTree(folders, described: described)
         }
+    }
+
+    /// Folders as an indented tree, "name (notes, described)": far shorter than full paths
+    /// and ids on every line. Ids are shown only for folders whose path is not unique.
+    private func folderTree(_ folders: [FolderSnapshot], described: [String: Int]) -> String {
+        let paths = Dictionary(grouping: folders, by: \.path)
+        let ordered = folders.sorted { a, b in
+            let x = a.path.split(separator: "/"), y = b.path.split(separator: "/")
+            for (p, q) in zip(x, y) where p != q { return p.localizedStandardCompare(q) == .orderedAscending }
+            return x.count < y.count
+        }
+        let total = folders.reduce(0) { $0 + $1.noteCount }, totalDescribed = described.values.reduce(0, +)
+        var lines = ["\(total) notes in \(folders.count) folders, \(totalDescribed) described. Refer to a folder by its path, such as Parent/Child."]
+        for f in ordered {
+            let parts = f.path.split(separator: "/")
+            var counts = "\(f.noteCount)"
+            if let d = described[f.id], d > 0 { counts += ", \(d) described" }
+            let id = (paths[f.path]?.count ?? 0) > 1 ? " [id \(ShortID.of(f.id))]" : ""
+            lines.append(String(repeating: "  ", count: parts.count - 1) + "\(parts.last ?? "") (\(counts))\(id)")
+        }
+        return lines.joined(separator: "\n")
     }
 
     /// One line per note in scope, filtered and ordered. With `undescribed`, only notes lacking a
@@ -150,7 +168,7 @@ struct OverviewTool: Tool {
         for note in shown {
             let text = bodies[note.id] ?? ""
             let date = day(order == .created ? note.created : note.modified)
-            var line = "\(note.id) | \(note.isPinned ? "📌 " : "")\(listTitle(note.title)) | " + (showFolder ? "\(note.folderPath) | " : "")
+            var line = "\(ShortID.of(note.id)) | \(note.isPinned ? "📌 " : "")\(listTitle(note.title)) | " + (showFolder ? "\(note.folderPath) | " : "")
                 + "\(date) | \(note.isLocked ? "locked" : sizeLabel(characters: text.count, attachments: attachments[note.id] ?? [:]))"
             if undescribed {
                 lines.append(line)
@@ -222,7 +240,7 @@ struct SearchTool: Tool {
         "created_after": stringProperty("YYYY-MM-DD, inclusive"),
         "created_before": stringProperty("YYYY-MM-DD, exclusive"),
         "sort": sortProperty("Instead of best match: newest modified or created first, or title"),
-        "limit": ["type": "integer", "minimum": 1, "maximum": 100, "description": "Default 20"],
+        "limit": ["type": "integer", "minimum": 1, "maximum": 100, "description": "Default 10"],
     ], required: ["query"])
     let annotations = ToolAnnotations.readOnly
 
@@ -231,7 +249,7 @@ struct SearchTool: Tool {
         let query = try args.string("query")
         let matchAll = try args.choice("match", ["all", "any"], default: "all") == "all"
         let folder = try args.optionalString("folder")
-        let limit = try args.int("limit", default: 20, range: 1...100)
+        let limit = try args.int("limit", default: 10, range: 1...100)
         let window = try args.dateWindow(), createdWindow = try args.dateWindow("created")
         let order = try args.order()
         return try await notesResult {
@@ -250,7 +268,7 @@ struct SearchTool: Tool {
             var lines = ["\(total) notes match \"\(query)\"\(scope)\(total > hits.count ? ", showing \(hits.count)" : ""):"]
             for hit in hits {
                 let date = day(order == .created ? hit.created : hit.modified)
-                lines.append("\(hit.id) | \(listTitle(hit.title)) | \(hit.folderPath) | \(date) | \(sizeLabel(characters: hit.length, attachments: attachments[hit.id] ?? [:]))")
+                lines.append("\(ShortID.of(hit.id)) | \(listTitle(hit.title)) | \(hit.folderPath) | \(date) | \(sizeLabel(characters: hit.length, attachments: attachments[hit.id] ?? [:]))")
                 lines.append("  \(hit.snippet)")
             }
             return lines.joined(separator: "\n")
@@ -262,9 +280,10 @@ struct ReadNoteTool: Tool {
     let notes: NotesContext
     let name = "read_note"
     let title: String? = "Read a note"
-    let description = "A note as Markdown, with the version to pass back when writing. By id or exact title."
+    let description = "Notes as Markdown, with the version to pass back when writing. By id, several ids, or exact title."
     let inputSchema = schema([
         "id": stringProperty("Note id"),
+        "ids": ["type": "array", "items": ["type": "string"], "maxItems": 20, "description": "Several note ids, read in one call"],
         "title": stringProperty("Exact title, instead of id"),
     ])
     let annotations = ToolAnnotations.readOnly
@@ -272,31 +291,45 @@ struct ReadNoteTool: Tool {
     func call(_ arguments: [String: JSONValue]) async throws -> ToolResult {
         let args = Arguments(arguments)
         let givenID = try args.optionalString("id"), givenTitle = try args.optionalString("title")
-        guard (givenID == nil) != (givenTitle == nil) else { throw MCPError.invalidParams("give either id or title") }
+        var givenIDs: [String] = []
+        if case .array(let items)? = arguments["ids"] { givenIDs = items.compactMap(\.stringValue) }
+        guard [givenID != nil, givenTitle != nil, !givenIDs.isEmpty].filter({ $0 }).count == 1 else {
+            throw MCPError.invalidParams("give one of id, ids or title")
+        }
+        guard givenIDs.count <= 20 else { throw MCPError.invalidParams("ids takes at most 20 notes") }
         return try await notesResult {
-            var id = givenID ?? ""
+            var refs = givenID.map { [$0] } ?? givenIDs
             if let givenTitle {
                 let matches = try await notes.repository.notes(titled: givenTitle)
                 if matches.isEmpty { return "No note is titled \"\(givenTitle)\". Use search to find it." }
                 if matches.count > 1 {
                     return (["\(matches.count) notes are titled \"\(givenTitle)\"; read one by id:"]
-                        + matches.map { "\($0.id) | \($0.folderPath) | \(day($0.modified))" }).joined(separator: "\n")
+                        + matches.map { "\(ShortID.of($0.id)) | \($0.folderPath) | \(day($0.modified))" }).joined(separator: "\n")
                 }
-                id = matches[0].id
+                refs = [matches[0].id]
             }
-            let note = try await notes.repository.note(id: id)
-            let blocks = try await notes.repository.blocks(id: id)
-            var header = "id: \(id) | version: \(NotesRepository.version(of: blocks)) | folder: \(note.folderPath) | modified: \(minute(note.modified))"
-            if note.isShared { header += note.isSharedReadOnly ? " | shared with you read-only" : " | shared" }
-            if note.isInTrash { header += " | in Recently Deleted (read-only)" }
-            var text = header + "\n---\n" + MarkdownRenderer.render(blocks)
-            let description = try await notes.index.get(id)
-            if !notes.isFresh(description, modified: note.modified) {
-                text += "\n---\nThis note has \(description == nil ? "no description" : "an out-of-date description"). "
-                    + "Call describe_note with a one-line summary so overview can show it."
+            var parts: [String] = []
+            for ref in refs {
+                do {
+                    parts.append(try await render(try await notes.repository.resolveNoteID(ref)))
+                } catch let error as NotesError where refs.count > 1 {
+                    parts.append("\(ref): \(error)")
+                }
             }
-            return text
+            return parts.joined(separator: "\n\n")
         }
+    }
+
+    /// Header (id, version, folder, date, flags), then the Markdown. Attachment ids are
+    /// shortened; writes map them back.
+    private func render(_ id: String) async throws -> String {
+        let note = try await notes.repository.note(id: id)
+        let blocks = try await notes.repository.blocks(id: id)
+        var header = "id: \(ShortID.of(id)) | version: \(NotesRepository.version(of: blocks)) | folder: \(note.folderPath) | modified: \(minute(note.modified))"
+        if note.isShared { header += note.isSharedReadOnly ? " | shared with you read-only" : " | shared" }
+        if note.isInTrash { header += " | in Recently Deleted (read-only)" }
+        if !notes.isFresh(try await notes.index.get(id), modified: note.modified) { header += " | needs description" }
+        return header + "\n---\n" + MarkdownRenderer.render(blocks.mappingAttachmentIDs(ShortID.of))
     }
 }
 
@@ -333,11 +366,12 @@ struct DescribeNoteTool: Tool {
             var failed: [String] = []
             for (id, text) in wanted {
                 do {
-                    let note = try await notes.repository.note(id: id)
-                    try await notes.index.set(id, text: text, source: .agent, noteModified: note.modified)
+                    let fullID = try await notes.repository.resolveNoteID(id)
+                    let note = try await notes.repository.note(id: fullID)
+                    try await notes.index.set(fullID, text: text, source: .agent, noteModified: note.modified)
                     saved.append(note.title)
                 } catch let error as NotesError {
-                    guard case .notFound = error else { throw error }
+                    if case .notFound = error {} else if case .refused = error {} else { throw error }
                     failed.append("\(id): \(error)")
                 }
             }
