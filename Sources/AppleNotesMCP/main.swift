@@ -52,7 +52,8 @@ let instructions = """
     <mark>highlight</mark>, [text](url), tables as | a | b |. Underscores are plain text.
     Keep ![…](attachment:…) placeholders as they are: attachments cannot be added or removed here.
     When read_note says a note has no description, call describe_note with a one-line summary; \
-    overview shows these (~ marks an automatic one).
+    overview shows these (~ marks an automatic one). When asked to describe many notes, use overview \
+    with undescribed: true and pass all the summaries to describe_note in one call.
     """
 
 // While set (development and checks), writes only touch notes whose title starts with it.

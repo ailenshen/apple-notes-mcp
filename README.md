@@ -74,10 +74,10 @@ Both are granted to **Apple Notes MCP**, not to Terminal, Claude or Node — so 
 
 | Tool | What it does |
 |------|-------------|
-| `overview` | All folders with note counts; or one line per note in a folder, with a short description |
+| `overview` | All folders with note counts; or one line per note in a folder, with a short description; or the notes still missing a description, with the start of their text |
 | `search` | Full-text search over titles and bodies, with the matching text |
 | `read_note` | The note as Markdown, plus a version to pass back when writing |
-| `describe_note` | Saves a one-line description shown by `overview` |
+| `describe_note` | Saves one-line descriptions, for one note or many at once, shown by `overview` |
 | `create_note` | A new note from Markdown |
 | `append_to_note` | Adds Markdown at the end, at the start, or at the end of a heading's section |
 | `edit_note` | Replaces one piece of text, like editing a file |

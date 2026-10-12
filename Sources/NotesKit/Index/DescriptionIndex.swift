@@ -1,12 +1,13 @@
 import Foundation
 
 // One-line descriptions of notes, for `overview`. Derived data: deleting the file only loses
-// descriptions the model wrote. Sources, best first: written by the model (describe_note),
-// generated on-device by Apple's model (where available), or extracted from the note.
-// 当 Apple 端侧模型在多数机器上可用时，补上 apple_fm 来源的后台生成，并调整优先级。
+// descriptions the model wrote. Sources, best first: written by the calling model
+// (describe_note, usually in bulk from overview's undescribed list), or extracted from the note.
+// The server never generates descriptions itself: the calling model knows the user's intent and
+// costs nothing extra to run here. 当客户端普遍支持 sampling 时，再考虑后台生成。
 
 public struct NoteDescription: Sendable {
-    public enum Source: String, Sendable { case agent, appleFM = "apple_fm", extractive }
+    public enum Source: String, Sendable { case agent, extractive }
     public var text: String
     public var source: Source
     /// The note's modification date when the description was written.

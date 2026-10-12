@@ -68,15 +68,26 @@ struct OverviewTool: Tool {
     let description = """
         Without folder: every folder with its id, note count and how many notes have a description. \
         With folder (path or id): one line per note — id | title | last modified | description \
-        (~ marks a description extracted automatically, ! one that is out of date).
+        (~ marks a description extracted automatically, ! one that is out of date). \
+        With undescribed: true (with or without folder): only notes lacking a current description, \
+        each with the start of its text, so you can write descriptions for many notes at once \
+        with describe_note.
         """
-    let inputSchema = schema(["folder": stringProperty("Folder path such as \"Projects/Ideas\", or a folder id")])
+    let inputSchema = schema([
+        "folder": stringProperty("Folder path such as \"Projects/Ideas\", or a folder id"),
+        "undescribed": ["type": "boolean", "description": "List only notes without a current description, with the start of their text"],
+        "limit": ["type": "integer", "minimum": 1, "maximum": 200, "description": "With undescribed: at most this many notes (default 50)"],
+    ])
     let annotations = ToolAnnotations.readOnly
 
     func call(_ arguments: [String: JSONValue]) async throws -> ToolResult {
-        let folder = try Arguments(arguments).optionalString("folder")
+        let args = Arguments(arguments)
+        let folder = try args.optionalString("folder")
+        let undescribed = try args.bool("undescribed", default: false)
+        let limit = try args.int("limit", default: 50, range: 1...200)
         return try await notesResult {
             let descriptions = try await notes.index.all()
+            if undescribed { return try await undescribedNotes(folder: folder, limit: limit, descriptions: descriptions) }
             if let folder {
                 let resolved = try await notes.repository.resolveFolder(folder)
                 let list = try await notes.repository.notes(inFolder: resolved.id)
@@ -108,6 +119,46 @@ struct OverviewTool: Tool {
             lines.append("\(folders.reduce(0) { $0 + $1.noteCount }) notes in \(folders.count) folders")
             return lines.joined(separator: "\n")
         }
+    }
+
+    /// The material for writing descriptions in bulk: notes without a current description, each
+    /// with the start of its text. The calling model writes them; the server never generates any.
+    /// 当主流客户端声明 sampling 能力时，可考虑由服务器在后台请求客户端模型生成描述。
+    private func undescribedNotes(folder: String?, limit: Int, descriptions: [String: NoteDescription]) async throws -> String {
+        let scope: [FolderSnapshot]
+        if let folder {
+            let resolved = try await notes.repository.resolveFolder(folder)
+            scope = try await notes.repository.folders().filter { $0.id == resolved.id || $0.path.hasPrefix(resolved.path + "/") }
+        } else {
+            scope = try await notes.repository.folders()
+        }
+        var pending: [NoteSnapshot] = []
+        for f in scope {
+            pending += try await notes.repository.notes(inFolder: f.id)
+                .filter { !$0.isLocked && !notes.isFresh(descriptions[$0.id], modified: $0.modified) }
+        }
+        let where_ = folder.map { " in \($0)" } ?? ""
+        if pending.isEmpty { return "Every note\(where_) has a current description." }
+        pending.sort { $0.modified > $1.modified }
+        let shown = Array(pending.prefix(limit))
+        let bodies = try await notes.search.bodies(ids: Set(shown.map(\.id)))
+        var lines = ["\(pending.count) notes\(where_) have no current description\(pending.count > shown.count ? " (showing the \(shown.count) most recently modified)" : ""):"]
+        for note in shown {
+            lines.append("\(note.id) | \(note.title) | \(note.folderPath) | \(day(note.modified))")
+            lines.append("  " + Self.opening(of: bodies[note.id] ?? "", title: note.title))
+        }
+        lines.append("Write one line per note with describe_note, several notes per call.")
+        return lines.joined(separator: "\n")
+    }
+
+    /// The first ~300 characters after the title, on one line.
+    static func opening(of text: String, title: String) -> String {
+        var lines = text.replacingOccurrences(of: "\u{FFFC}", with: "").components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        if lines.first == title { lines.removeFirst() }
+        let joined = lines.joined(separator: " ¶ ")
+        if joined.isEmpty { return "(title only)" }
+        return joined.count > 300 ? String(joined.prefix(299)) + "…" : joined
     }
 }
 
@@ -185,23 +236,50 @@ struct ReadNoteTool: Tool {
 struct DescribeNoteTool: Tool {
     let notes: NotesContext
     let name = "describe_note"
-    let title: String? = "Describe a note"
-    let description = "Saves a one-line summary of a note (what it is about, in the note's language). Shown by overview."
+    let title: String? = "Describe notes"
+    let description = """
+        Saves one-line summaries of notes (what each is about, in the note's language), shown by overview. \
+        Pass one or many; overview with undescribed: true lists notes that need one.
+        """
     let inputSchema = schema([
-        "id": stringProperty("Note id"),
-        "description": stringProperty("One line, at most about 80 characters"),
-    ], required: ["id", "description"])
+        "descriptions": [
+            "type": "array", "minItems": 1, "maxItems": 200,
+            "items": schema([
+                "id": stringProperty("Note id"),
+                "description": stringProperty("One line, at most about 80 characters"),
+            ], required: ["id", "description"]),
+        ],
+    ], required: ["descriptions"])
     let annotations = ToolAnnotations(idempotent: true)
 
     func call(_ arguments: [String: JSONValue]) async throws -> ToolResult {
-        let args = Arguments(arguments)
-        let id = try args.string("id")
-        let text = try args.string("description").trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\n", with: " ")
-        guard !text.isEmpty else { throw MCPError.invalidParams("description must not be empty") }
+        guard case .array(let items)? = arguments["descriptions"], !items.isEmpty, items.count <= 200 else {
+            throw MCPError.invalidParams("descriptions must be a list of 1 to 200 {id, description} objects")
+        }
+        var wanted: [(id: String, text: String)] = []
+        for item in items {
+            let args = Arguments(item.objectValue ?? [:])
+            let text = try args.string("description").trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: "\n", with: " ")
+            guard !text.isEmpty else { throw MCPError.invalidParams("a description must not be empty") }
+            wanted.append((try args.string("id"), text))
+        }
         return try await notesResult {
-            let note = try await notes.repository.note(id: id)
-            try await notes.index.set(id, text: text, source: .agent, noteModified: note.modified)
-            return "Saved the description of \"\(note.title)\"."
+            var saved: [String] = []
+            var failed: [String] = []
+            for (id, text) in wanted {
+                do {
+                    let note = try await notes.repository.note(id: id)
+                    try await notes.index.set(id, text: text, source: .agent, noteModified: note.modified)
+                    saved.append(note.title)
+                } catch let error as NotesError {
+                    guard case .notFound = error else { throw error }
+                    failed.append("\(id): \(error)")
+                }
+            }
+            var lines = [saved.count == 1 ? "Saved the description of \"\(saved[0])\"." : "Saved \(saved.count) descriptions."]
+            if !failed.isEmpty { lines.append("Not saved:"); lines += failed.map { "  " + $0 } }
+            return lines.joined(separator: "\n")
         }
     }
 }

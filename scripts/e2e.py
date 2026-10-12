@@ -47,8 +47,11 @@ err, text = call("read_note", id=note_id)
 version = re.search(r"version: (\w+)", text).group(1) if not err else ""
 check("read_note returns Markdown and asks for a description", not err and "**bold**" in text and "describe_note" in text, text)
 
-err, text = call("describe_note", id=note_id, description="End-to-end test note")
-check("describe_note", not err, text)
+err, text = call("overview", undescribed=True, limit=200)
+check("overview lists undescribed notes with their text", not err and note_id in text and "describe_note" in text, text[:300])
+err, text = call("describe_note", descriptions=[{"id": note_id, "description": "End-to-end test note"},
+                                                 {"id": "00000000-0000-0000-0000-000000000000", "description": "missing"}])
+check("describe_note saves one and reports the missing one", not err and "Saved the description" in text and "Not saved" in text, text)
 err, text = call("overview", folder="Notes")
 check("overview shows the description", not err and "End-to-end test note" in text, text[:400])
 
