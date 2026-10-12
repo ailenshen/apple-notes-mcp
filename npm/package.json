@@ -1,6 +1,6 @@
 {
   "name": "@ailenshen/apple-notes-mcp",
-  "version": "2.0.0-beta.5",
+  "version": "2.0.0-beta.6",
   "description": "Read and edit Apple Notes from AI assistants over MCP: native formatting, in-place edits, tables, iCloud sync",
   "keywords": ["mcp", "apple-notes", "notes", "macos", "claude"],
   "repository": {
