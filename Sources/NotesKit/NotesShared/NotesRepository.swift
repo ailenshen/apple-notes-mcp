@@ -13,7 +13,7 @@ public final class NotesRepository {
     private var writeContext: WriteContext?
     /// Notes deleted by this process. The store may show them in their old folder for minutes
     /// (Notes.app saves lazily in the background), so reads treat them as deleted until then.
-    public private(set) var deletedHere: Set<String> = []
+    public internal(set) var deletedHere: Set<String> = []
 
     /// While set, writes only touch notes whose title starts with this prefix. Development
     /// builds and the checks set it to "MCP Test " so real notes are never written by accident.
@@ -24,7 +24,7 @@ public final class NotesRepository {
     }
 
     /// Opened on first use, so the server still answers discovery when access is missing.
-    private func store() throws(NotesError) -> ReadStore {
+    func store() throws(NotesError) -> ReadStore {
         if let readStore { return readStore }
         let opened = try ReadStore()
         readStore = opened
@@ -353,7 +353,7 @@ public final class NotesRepository {
 
     // MARK: Folders
 
-    private var hasMultipleAccounts = false
+    var hasMultipleAccounts = false
 
     /// User folders as a flat list in path order.
     public func folders() throws(NotesError) -> [FolderSnapshot] {
@@ -449,7 +449,7 @@ public final class NotesRepository {
         return false
     }
 
-    private func fetch(_ store: ReadStore, _ entity: String, _ predicate: NSPredicate) throws(NotesError) -> [NSManagedObject] {
+    func fetch(_ store: ReadStore, _ entity: String, _ predicate: NSPredicate) throws(NotesError) -> [NSManagedObject] {
         let request = NSFetchRequest<NSManagedObject>(entityName: entity)
         request.predicate = predicate
         do {

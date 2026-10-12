@@ -14,11 +14,11 @@ proc = subprocess.Popen([BIN], stdin=subprocess.PIPE, stdout=subprocess.PIPE, st
 counter = 0
 failures = 0
 
-def call(name, **arguments):
+def call(tool, **arguments):
     global counter
     counter += 1
     proc.stdin.write(json.dumps({"jsonrpc": "2.0", "id": counter, "method": "tools/call",
-                                 "params": {"_meta": META, "name": name, "arguments": arguments}}) + "\n")
+                                 "params": {"_meta": META, "name": tool, "arguments": arguments}}) + "\n")
     proc.stdin.flush()
     reply = json.loads(proc.stdout.readline())
     if "error" in reply:
@@ -90,12 +90,32 @@ check("update_note", not err, text)
 err, text = call("read_note", id=note_id)
 check("rewritten body reads back", "Rewritten body.\n| A | B |" in text, text)
 
+folder = f"MCP Test e2e folder {tag}"
+err, text = call("manage_folder", action="create", folder=folder)
+check("manage_folder create", not err, text)
+err, text = call("manage_folder", action="create", folder=folder)
+check("manage_folder refuses a duplicate name", err and "already exists" in text, text)
+err, text = call("move_note", id=note_id, folder=folder)
+check("move_note into the new folder", not err and folder in text, text)
+err, text = call("manage_folder", action="delete", folder=folder)
+check("manage_folder refuses to delete a folder with notes", err and "not empty" in text, text)
+err, text = call("manage_folder", action="rename", folder=folder, name=folder + " renamed")
+check("manage_folder rename", not err, text)
+err, text = call("move_note", id=note_id, folder="Notes")
+check("move_note back to Notes", not err, text)
+err, text = call("manage_folder", action="delete", folder=folder + " renamed")
+check("manage_folder deletes the empty folder", not err, text)
+
 err, text = call("delete_note", id="F19E73FE-16C9-4B0B-9FF0-7DDCB660F513")
 check("write guard refuses a real note", err and "write guard" in text, text)
 err, text = call("delete_note", id=note_id)
 check("delete_note", not err and "Recently Deleted" in text, text)
 err, text = call("delete_note", id=note_id)
 check("second delete is refused, not purged", err, text)
+err, text = call("move_note", id=note_id, folder="Notes")
+check("move_note restores from Recently Deleted", not err and "Restored" in text, text)
+err, text = call("delete_note", id=note_id)
+check("delete it again after restoring", not err, text)
 
 err, text = call("read_note", id=note_id)
 check("the note is in Recently Deleted", "in Recently Deleted" in text, text[:200])

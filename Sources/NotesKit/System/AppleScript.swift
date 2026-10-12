@@ -4,6 +4,11 @@ import Foundation
 /// Needs Automation → Notes permission for the responsible process.
 @MainActor
 enum AppleScript {
+    /// An AppleScript string literal for `text`.
+    static func quoted(_ text: String) -> String {
+        "\"" + text.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
+    }
+
     @discardableResult
     static func run(_ source: String) throws(NotesError) -> String? {
         guard let script = NSAppleScript(source: source) else { throw .failed("invalid AppleScript") }

@@ -67,6 +67,6 @@ let server = Server(
     tools: [
         OverviewTool(notes: notes), SearchTool(notes: notes), ReadNoteTool(notes: notes), DescribeNoteTool(notes: notes),
         CreateNoteTool(notes: notes), AppendToNoteTool(notes: notes), EditNoteTool(notes: notes),
-        UpdateNoteTool(notes: notes), DeleteNoteTool(notes: notes),
+        UpdateNoteTool(notes: notes), DeleteNoteTool(notes: notes), MoveNoteTool(notes: notes), ManageFolderTool(notes: notes),
     ])
 await StdioTransport.run(server)

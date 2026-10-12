@@ -241,3 +241,76 @@ struct DeleteNoteTool: Tool {
         }
     }
 }
+
+struct MoveNoteTool: Tool {
+    let notes: NotesContext
+    let name = "move_note"
+    let title: String? = "Move a note"
+    let description = """
+        Moves a note to another folder (path or id) of the same account; the note keeps its id. \
+        A note in Recently Deleted is restored this way. Moving into or out of a shared folder changes \
+        who can see the note: ask the user first, then pass allow_shared: true.
+        """
+    let inputSchema = schema([
+        "id": stringProperty("Note id"),
+        "folder": stringProperty("Destination folder path such as \"Projects/Ideas\", or a folder id"),
+        "allow_shared": ["type": "boolean", "description": "The user agreed to a move into or out of a shared folder"],
+    ], required: ["id", "folder"])
+    let annotations = ToolAnnotations(idempotent: false)
+
+    func call(_ arguments: [String: JSONValue]) async throws -> ToolResult {
+        let args = Arguments(arguments)
+        let id = try args.string("id"), folder = try args.string("folder")
+        let allowShared = try args.bool("allow_shared", default: false)
+        return try await writeResult {
+            let moved = try await notes.repository.move(id: id, toFolder: folder, allowShared: allowShared)
+            let sync = try await notes.sync.settle(id: id)
+            let verb = moved.restored ? "Restored" : "Moved"
+            return ToolResult("\(verb) \"\(moved.title)\" from \(moved.from) to \(moved.to). id: \(id) | "
+                + (sync.synced ? "uploaded to iCloud." : "saved on this Mac; iCloud has not taken it yet (Notes will upload it later)."))
+        }
+    }
+}
+
+struct ManageFolderTool: Tool {
+    let notes: NotesContext
+    let name = "manage_folder"
+    let title: String? = "Create, rename or delete a folder"
+    let description = """
+        action create: folder is the new folder's path, such as "Projects/Ideas" (the parent must exist; \
+        a single name makes a top-level folder). action rename: folder (path or id) gets the new name. \
+        action delete: removes an empty folder; folders that still hold notes or subfolders are refused, \
+        so move their notes first. Folders cannot be moved here. Renaming a shared folder changes it for \
+        everyone: ask the user first, then pass allow_shared: true.
+        """
+    let inputSchema = schema([
+        "action": ["type": "string", "enum": ["create", "rename", "delete"], "description": "create, rename or delete"],
+        "folder": stringProperty("For create, the new folder's path; otherwise the folder's path or id"),
+        "name": stringProperty("For rename: the new name"),
+        "allow_shared": ["type": "boolean", "description": "The user agreed to renaming a shared folder"],
+    ], required: ["action", "folder"])
+    let annotations = ToolAnnotations(destructive: true, idempotent: false)
+
+    func call(_ arguments: [String: JSONValue]) async throws -> ToolResult {
+        let args = Arguments(arguments)
+        let action = try args.choice("action", ["create", "rename", "delete"], default: "")
+        guard !action.isEmpty else { throw MCPError.invalidParams("action must be create, rename or delete") }
+        let folder = try args.string("folder")
+        return try await writeResult {
+            switch action {
+            case "create":
+                let path = try await notes.repository.createFolder(path: folder)
+                return ToolResult("Created the folder \(path).")
+            case "rename":
+                guard let name = try args.optionalString("name") else { throw MCPError.invalidParams("rename needs name") }
+                let renamed = try await notes.repository.renameFolder(folder, to: name, allowShared: try args.bool("allow_shared", default: false))
+                return ToolResult("Renamed \(renamed.old) to \(renamed.new).")
+            case "delete":
+                let path = try await notes.repository.deleteFolder(folder)
+                return ToolResult("Deleted the empty folder \(path).")
+            default:
+                throw MCPError.invalidParams("action must be create, rename or delete")
+            }
+        }
+    }
+}
