@@ -299,3 +299,74 @@ struct ManageFolderTool: Tool {
         }
     }
 }
+
+/// Experiment (explore-merge): append_to_note, edit_note and update_note as one tool, with
+/// several changes per call.
+struct MergedEditTool: Tool {
+    let notes: NotesContext
+    let name = "edit_note"
+    let title: String? = "Edit a note"
+    let description = """
+        Changes a note in one call: replace (exact text pairs from read_note, applied in order), insert \
+        (Markdown at the end, the start, or under a heading), or rewrite (the whole note). Unchanged text \
+        keeps its formatting.
+        """
+    let inputSchema = schema([
+        "id": stringProperty("Note id"),
+        "version": stringProperty("From read_note; required for rewrite"),
+        "replace": [
+            "type": "array",
+            "items": schema(["old": stringProperty("Exact Markdown, unique unless all"), "new": stringProperty("Markdown"),
+                             "all": ["type": "boolean"]], required: ["old", "new"]),
+        ],
+        "insert": stringProperty("Markdown to add"),
+        "at": stringProperty("end (default), start, or a heading's text"),
+        "rewrite": stringProperty("The whole note as Markdown"),
+    ], required: ["id"])
+    let annotations = ToolAnnotations(destructive: true)
+
+    func call(_ arguments: [String: JSONValue]) async throws -> ToolResult {
+        let args = Arguments(arguments)
+        let ref = try args.string("id")
+        let version = try args.optionalString("version")
+        var pairs: [(old: String, new: String, all: Bool)] = []
+        if case .array(let items)? = arguments["replace"] {
+            for item in items {
+                let a = Arguments(item.objectValue ?? [:])
+                let old = try a.string("old")
+                guard !old.isEmpty else { throw MCPError.invalidParams("replace.old must not be empty") }
+                pairs.append((old, try a.string("new"), try a.bool("all", default: false)))
+            }
+        }
+        let insert = try args.optionalString("insert").map(trimmedBlocks)
+        let at = try args.optionalString("at") ?? "end"
+        let rewrite = try args.optionalString("rewrite").map(trimmedBlocks)
+        if rewrite != nil, !pairs.isEmpty || insert != nil { throw MCPError.invalidParams("rewrite cannot be combined with replace or insert") }
+        if rewrite == nil, pairs.isEmpty, insert == nil { throw MCPError.invalidParams("give replace, insert or rewrite") }
+        if rewrite != nil, version == nil { throw MCPError.invalidParams("rewrite needs the version from read_note") }
+        if let rewrite, rewrite.isEmpty { throw MCPError.invalidParams("rewrite must not be empty; use delete_note") }
+        return try await writeResult {
+            let id = try await notes.repository.resolveNoteID(ref)
+            let outcome = try await notes.repository.update(id: id, expectedVersion: version) { blocks throws(NotesError) in
+                if let rewrite { return rewrite }
+                var result = blocks
+                if !pairs.isEmpty {
+                    var markdown = MarkdownRenderer.render(blocks.mappingAttachmentIDs(ShortID.of))
+                    for (old, new, all) in pairs {
+                        let count = markdown.components(separatedBy: old).count - 1
+                        if count == 0 { throw .notFound("\"\(old)\" in the note. Closest line: \"\(closestLine(to: old, in: markdown))\"") }
+                        if count > 1, !all { throw .refused("\"\(old)\" appears \(count) times; add context or set all") }
+                        markdown = markdown.replacingOccurrences(of: old, with: new)
+                    }
+                    result = MarkdownParser.parse(markdown)
+                }
+                if let insert {
+                    let heading = at == "end" || at == "start" ? nil : at
+                    result.insert(contentsOf: insert, at: try insertionIndex(in: result, heading: heading, atStart: at == "start"))
+                }
+                return result
+            }
+            return try await writeReport("Updated", outcome, notes: notes)
+        }
+    }
+}

@@ -21,6 +21,13 @@ TASKS = {
     "find": "Find my note titled '{find}' and list the kinds of formatting it uses (headings, lists, tables and so on). Be brief.",
     # The Claude Projects pattern: instructions point at one folder to read.
     "folder": "My folder '{folder}' is relevant here: read all of its notes, then summarize what the folder covers in one short paragraph.",
+    # The same changes asked for naturally, without saying how many calls to make.
+    "write2": (
+        "Create a note titled 'MCP Test Bench' containing: a heading 'Tasks' with checklist items milk, eggs "
+        "and bread; a heading 'Notes' with one bullet 'first'; and a table with header Item | Qty and one row "
+        "Milk | 1. Then tick 'eggs', add a bullet 'second' under Notes, and change Milk's quantity to 2. "
+        "Read the note back and say in one line whether all three changes are there. Finally delete the note."
+    ),
     "write": (
         "Create a note titled 'MCP Test Bench' containing: a heading 'Tasks' with checklist items milk, eggs "
         "and bread; a heading 'Notes' with one bullet 'first'; and a table with header Item | Qty and one row "

@@ -43,7 +43,7 @@ case .server:
 
 let instructions = """
     Apple Notes on this Mac. Find notes with overview or search, then read_note. Pass read_note's \
-    version back when writing. Prefer edit_note for small changes and append_to_note for additions.
+    version back when writing. \(ProcessInfo.processInfo.environment["APPLE_NOTES_MCP_TOOLS"] == "merged" ? "Make all changes to a note in one edit_note call." : "Prefer edit_note for small changes and append_to_note for additions.")
     One note paragraph is one Markdown line. Formatting: # title, ## heading, ### subheading, \
     * - 1. lists, - [ ] / - [x] checklist, > quote, ``` code, **bold**, *italic*, ~~strike~~, \
     <u>underline</u>, <mark>highlight</mark>, [link](url), | tables |. Keep ![…](attachment:…) placeholders.
@@ -58,9 +58,15 @@ let notes = NotesContext(
 
 let server = Server(
     info: ServerInfo(name: "apple-notes-mcp", version: version, instructions: instructions),
-    tools: [
+    tools: ProcessInfo.processInfo.environment["APPLE_NOTES_MCP_TOOLS"] == "merged"
+        ? [
+            OverviewTool(notes: notes), SearchTool(notes: notes), ReadNoteTool(notes: notes), DescribeNoteTool(notes: notes),
+            CreateNoteTool(notes: notes), MergedEditTool(notes: notes), DeleteNoteTool(notes: notes), MoveNoteTool(notes: notes),
+            ManageFolderTool(notes: notes), ReadAttachmentTool(notes: notes),
+        ]
+        : [
         OverviewTool(notes: notes), SearchTool(notes: notes), ReadNoteTool(notes: notes), DescribeNoteTool(notes: notes),
         CreateNoteTool(notes: notes), AppendToNoteTool(notes: notes), EditNoteTool(notes: notes),
         UpdateNoteTool(notes: notes), DeleteNoteTool(notes: notes), MoveNoteTool(notes: notes), ManageFolderTool(notes: notes), ReadAttachmentTool(notes: notes),
-    ])
+        ])
 await StdioTransport.run(server)
