@@ -99,7 +99,7 @@ One note paragraph is one Markdown line, so reading a note and writing it back n
 | Bold, italic, strikethrough | `**…**`, `*…*`, `~~…~~` |
 | Underline, highlight | `<u>…</u>`, `<mark>…</mark>` |
 | Link | `[text](url)` |
-| Table | `\| a \| b \|` (cells are plain text; an edit changes only the cells that differ, so formatting made in Notes stays) |
+| Table | `\| a \| b \|` (cells are plain text; an edit usually changes only the cells that differ, keeping formatting made in Notes, but a table you also edited in Notes recently is rebuilt so iCloud gets the change) |
 | Image, file, note link, hashtag | `![image](attachment:…)` — kept as is; cannot be added or removed |
 
 Locked notes are skipped. Shared notes and notes in Recently Deleted are read-only.
