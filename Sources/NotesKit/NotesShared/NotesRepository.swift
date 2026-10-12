@@ -386,6 +386,17 @@ public final class NotesRepository {
             .sorted { ($0.isPinned ? 1 : 0, $0.modified) > ($1.isPinned ? 1 : 0, $1.modified) }
     }
 
+    /// Notes in any of these folders (all user folders when nil), in one fetch. Text is not loaded.
+    public func notes(inFolders folderIDs: Set<String>?) throws(NotesError) -> [NoteSnapshot] {
+        let store = try store()
+        store.refresh()
+        _ = try folders()
+        let predicate = folderIDs.map { NSPredicate(format: "markedForDeletion == NO AND folder.identifier IN %@", Array($0)) }
+            ?? NSPredicate(format: "markedForDeletion == NO AND folder.folderType != 1")
+        return try fetch(store, "ICNote", predicate).map { note throws(NotesError) in try snapshot(of: note, includeText: false) }
+            .filter { !deletedHere.contains($0.id) && !$0.isInTrash }
+    }
+
     /// User folder paths keyed by store primary key, for the SQL-based search.
     public func folderPathsByPrimaryKey() throws(NotesError) -> [Int64: String] {
         let store = try store()

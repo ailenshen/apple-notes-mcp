@@ -108,12 +108,12 @@ struct OverviewTool: Tool {
                                           limit: limit, descriptions: descriptions)
             }
             let folders = try await notes.repository.folders()
-            var lines = ["path | id | notes | described"]
-            for f in folders {
-                let list = try await notes.repository.notes(inFolder: f.id)
-                let described = list.filter { notes.isFresh(descriptions[$0.id], modified: $0.modified) }.count
-                lines.append("\(f.path) | \(f.id) | \(f.noteCount) | \(described)")
+            var described: [String: Int] = [:]
+            for note in try await notes.repository.notes(inFolders: nil) where notes.isFresh(descriptions[note.id], modified: note.modified) {
+                described[note.folderID, default: 0] += 1
             }
+            var lines = ["path | id | notes | described"]
+            for f in folders { lines.append("\(f.path) | \(f.id) | \(f.noteCount) | \(described[f.id] ?? 0)") }
             lines.append("\(folders.reduce(0) { $0 + $1.noteCount }) notes in \(folders.count) folders")
             return lines.joined(separator: "\n")
         }
@@ -127,17 +127,14 @@ struct OverviewTool: Tool {
         folder: String?, window: DateWindow, order: NoteOrder, undescribed: Bool, limit: Int,
         descriptions: [String: NoteDescription]
     ) async throws -> String {
-        let scope: [FolderSnapshot]
+        var scope: Set<String>?
         var scopeName = "all folders"
         if let folder {
             let resolved = try await notes.repository.resolveFolder(folder)
-            scope = try await notes.repository.folders().filter { $0.id == resolved.id || $0.path.hasPrefix(resolved.path + "/") }
+            scope = Set(try await notes.repository.folders().filter { $0.id == resolved.id || $0.path.hasPrefix(resolved.path + "/") }.map(\.id))
             scopeName = resolved.path
-        } else {
-            scope = try await notes.repository.folders()
         }
-        var list: [NoteSnapshot] = []
-        for f in scope { list += try await notes.repository.notes(inFolder: f.id) }
+        var list = try await notes.repository.notes(inFolders: scope)
         list = list.filter { window.contains($0.modified) }
         if undescribed { list = list.filter { !$0.isLocked && !notes.isFresh(descriptions[$0.id], modified: $0.modified) } }
         switch order {
