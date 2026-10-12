@@ -51,10 +51,10 @@ struct CreateNoteTool: Tool {
     let notes: NotesContext
     let name = "create_note"
     let title: String? = "Create a note"
-    let description = "Creates a note from Markdown. The first line becomes the title (start with \"# Title\")."
+    let description = "Creates a note from Markdown; the first line is the title."
     let inputSchema = schema([
-        "markdown": stringProperty("Note body as Markdown"),
-        "folder": stringProperty("Folder path or id; default is the iCloud Notes folder"),
+        "markdown": stringProperty("Markdown"),
+        "folder": stringProperty("Path or id; default Notes"),
     ], required: ["markdown"])
     let annotations = ToolAnnotations()
 
@@ -75,16 +75,13 @@ struct AppendToNoteTool: Tool {
     let notes: NotesContext
     let name = "append_to_note"
     let title: String? = "Add to a note"
-    let description = """
-        Adds Markdown to a note without touching the rest. position "end" (default) or "start" (just \
-        below the title). under_heading puts it at the end of that heading's section instead.
-        """
+    let description = "Adds Markdown at the end, at the start, or at the end of a heading's section."
     let inputSchema = schema([
         "id": stringProperty("Note id"),
         "markdown": stringProperty("Markdown to add"),
         "position": ["type": "string", "enum": ["end", "start"], "description": "end (default) or start"],
-        "under_heading": stringProperty("Text of a heading in the note; the Markdown goes at the end of its section"),
-        "version": stringProperty("Version from read_note; the write is refused if the note changed since"),
+        "under_heading": stringProperty("Heading text; adds at the end of its section"),
+        "version": stringProperty("From read_note; refused if the note changed since"),
     ], required: ["id", "markdown"])
     let annotations = ToolAnnotations()
 
@@ -146,17 +143,13 @@ struct EditNoteTool: Tool {
     let notes: NotesContext
     let name = "edit_note"
     let title: String? = "Edit part of a note"
-    let description = """
-        Replaces old_text with new_text in the note's Markdown (as read_note shows it), like editing a \
-        file. old_text must appear exactly once unless replace_all is true. Only the changed characters \
-        are rewritten, so the rest of the note keeps its formatting.
-        """
+    let description = "Replaces old_text with new_text, like editing a file. Unchanged text keeps its formatting."
     let inputSchema = schema([
         "id": stringProperty("Note id"),
-        "old_text": stringProperty("Exact Markdown to replace, copied from read_note"),
-        "new_text": stringProperty("Replacement Markdown"),
-        "replace_all": ["type": "boolean", "description": "Replace every occurrence (default false)"],
-        "version": stringProperty("Version from read_note; the write is refused if the note changed since"),
+        "old_text": stringProperty("Exact Markdown from read_note; must be unique unless replace_all"),
+        "new_text": stringProperty("Markdown"),
+        "replace_all": ["type": "boolean", "description": "Replace every occurrence"],
+        "version": stringProperty("From read_note; refused if the note changed since"),
     ], required: ["id", "old_text", "new_text"])
     let annotations = ToolAnnotations(destructive: true)
 
@@ -199,15 +192,11 @@ struct UpdateNoteTool: Tool {
     let notes: NotesContext
     let name = "update_note"
     let title: String? = "Rewrite a note"
-    let description = """
-        Replaces the whole note with new Markdown. Unchanged lines are kept as they are, so formatting \
-        Markdown cannot show (colors, fonts) survives on them. Requires the version from read_note. \
-        Keep ![…](attachment:…) placeholders.
-        """
+    let description = "Rewrites the whole note. Unchanged lines keep their formatting."
     let inputSchema = schema([
         "id": stringProperty("Note id"),
-        "markdown": stringProperty("The complete new note as Markdown"),
-        "version": stringProperty("Version from read_note"),
+        "markdown": stringProperty("The whole note as Markdown"),
+        "version": stringProperty("From read_note"),
     ], required: ["id", "markdown", "version"])
     let annotations = ToolAnnotations(destructive: true, idempotent: true)
 
@@ -228,7 +217,7 @@ struct DeleteNoteTool: Tool {
     let notes: NotesContext
     let name = "delete_note"
     let title: String? = "Delete a note"
-    let description = "Moves a note to Recently Deleted, where it can be restored in Notes for 30 days."
+    let description = "Moves a note to Recently Deleted."
     let inputSchema = schema(["id": stringProperty("Note id")], required: ["id"])
     let annotations = ToolAnnotations(destructive: true, idempotent: false)
 
@@ -246,15 +235,11 @@ struct MoveNoteTool: Tool {
     let notes: NotesContext
     let name = "move_note"
     let title: String? = "Move a note"
-    let description = """
-        Moves a note to another folder (path or id) of the same account; the note keeps its id. \
-        A note in Recently Deleted is restored this way. Moving into or out of a shared folder changes \
-        who can see the note: ask the user first, then pass allow_shared: true.
-        """
+    let description = "Moves a note to another folder, or restores it from Recently Deleted. Shared folders need allow_shared, after asking the user."
     let inputSchema = schema([
         "id": stringProperty("Note id"),
-        "folder": stringProperty("Destination folder path such as \"Projects/Ideas\", or a folder id"),
-        "allow_shared": ["type": "boolean", "description": "The user agreed to a move into or out of a shared folder"],
+        "folder": stringProperty("Path or id"),
+        "allow_shared": ["type": "boolean", "description": "The user agreed to changing who can see the note"],
     ], required: ["id", "folder"])
     let annotations = ToolAnnotations(idempotent: false)
 
@@ -276,17 +261,11 @@ struct ManageFolderTool: Tool {
     let notes: NotesContext
     let name = "manage_folder"
     let title: String? = "Create, rename or delete a folder"
-    let description = """
-        action create: folder is the new folder's path, such as "Projects/Ideas" (the parent must exist; \
-        a single name makes a top-level folder). action rename: folder (path or id) gets the new name. \
-        action delete: removes an empty folder; folders that still hold notes or subfolders are refused, \
-        so move their notes first. Folders cannot be moved here. Renaming a shared folder changes it for \
-        everyone: ask the user first, then pass allow_shared: true.
-        """
+    let description = "Creates a folder (folder = its new path), renames one, or deletes an empty one. Renaming a shared folder needs allow_shared, after asking the user."
     let inputSchema = schema([
         "action": ["type": "string", "enum": ["create", "rename", "delete"], "description": "create, rename or delete"],
-        "folder": stringProperty("For create, the new folder's path; otherwise the folder's path or id"),
-        "name": stringProperty("For rename: the new name"),
+        "folder": stringProperty("Path or id (for create, the new path)"),
+        "name": stringProperty("New name, for rename"),
         "allow_shared": ["type": "boolean", "description": "The user agreed to renaming a shared folder"],
     ], required: ["action", "folder"])
     let annotations = ToolAnnotations(destructive: true, idempotent: false)

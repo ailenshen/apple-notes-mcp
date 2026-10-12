@@ -22,15 +22,10 @@ struct ReadAttachmentTool: Tool {
     let notes: NotesContext
     let name = "read_attachment"
     let title: String? = "Read an attachment"
-    let description = """
-        Opens an attachment from read_note's ![…](attachment:<id>) placeholders. Images, scans, drawings \
-        and video stills come as images; audio as audio; PDFs and other files as embedded files; tables as \
-        Markdown; links as their address. Text Notes recognized in images and handwriting, and text in PDFs \
-        and text files, comes as text. text_only: true skips the images, audio and files.
-        """
+    let description = "Opens an attachment from a ![…](attachment:id) placeholder: images, scans, PDFs, audio, video, tables, links and files."
     let inputSchema = schema([
-        "id": stringProperty("Attachment id from a ![…](attachment:<id>) placeholder"),
-        "text_only": ["type": "boolean", "description": "Only text, no images, audio or files (cheaper)"],
+        "id": stringProperty("Attachment id"),
+        "text_only": ["type": "boolean", "description": "Only text, no images or files"],
     ], required: ["id"])
     let annotations = ToolAnnotations.readOnly
 

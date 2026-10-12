@@ -57,10 +57,11 @@ struct Arguments {
         throw MCPError.invalidParams("\(key) must be a date like 2026-10-01 or 2026-10-01T09:00:00+08:00")
     }
 
-    func dateWindow() throws -> DateWindow {
-        let window = DateWindow(from: try optionalDate("modified_after"), until: try optionalDate("modified_before"))
+    /// `<field>_after` / `<field>_before`, for field "modified" or "created".
+    func dateWindow(_ field: String = "modified") throws -> DateWindow {
+        let window = DateWindow(from: try optionalDate("\(field)_after"), until: try optionalDate("\(field)_before"))
         if let from = window.from, let until = window.until, from >= until {
-            throw MCPError.invalidParams("modified_after must be earlier than modified_before")
+            throw MCPError.invalidParams("\(field)_after must be earlier than \(field)_before")
         }
         return window
     }

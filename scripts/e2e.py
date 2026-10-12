@@ -55,6 +55,8 @@ import datetime
 today = datetime.date.today().isoformat()
 err, text = call("overview", modified_after=today, sort="modified", limit=500)
 check("overview lists today's notes across folders, with sizes", not err and note_id in text and " chars" in text, text[:300])
+err, text = call("overview", created_after=today)
+check("overview created-date filter", not err and note_id in text and "created since" in text, text[:200])
 err, text = call("overview", modified_before="2000-01-01")
 check("overview date filter excludes newer notes", not err and note_id not in text, text[:200])
 err, text = call("search", query=f"zebra{tag}", modified_after=today, sort="title")

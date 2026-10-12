@@ -23,7 +23,7 @@ public enum NoteOrder: String, Sendable, CaseIterable {
     case modified, created, title
 }
 
-/// Which notes a list keeps, by modification date (from inclusive, until exclusive).
+/// A date range a list keeps (from inclusive, until exclusive).
 public struct DateWindow: Sendable {
     public var from: Date?
     public var until: Date?
@@ -49,7 +49,7 @@ public actor FullTextSearch {
     ///   - order: nil ranks by relevance (title matches first), else by date or title.
     public func search(
         _ query: String, matchAll: Bool, folderPath: String?, limit: Int, folderPaths: [Int64: String],
-        modified window: DateWindow = DateWindow(), order: NoteOrder? = nil
+        modified window: DateWindow = DateWindow(), created: DateWindow = DateWindow(), order: NoteOrder? = nil
     ) throws(NotesError) -> (total: Int, hits: [SearchHit]) {
         let terms = query.split(whereSeparator: \.isWhitespace).map(String.init)
         guard !terms.isEmpty else { throw .refused("the search query is empty") }
@@ -70,6 +70,7 @@ public actor FullTextSearch {
         for row in rows {
             guard let path = folderPaths[row.folder] else { continue }
             if !window.contains(Date(timeIntervalSinceReferenceDate: row.modified)) { continue }
+            if !created.contains(Date(timeIntervalSinceReferenceDate: row.created)) { continue }
             if let folderPath, path != folderPath, !path.hasPrefix(folderPath + "/") { continue }
             let text = try body(row.id, key: row.key, dataPK: row.dataPK, db: db)
             let haystack = row.title + "\n" + text

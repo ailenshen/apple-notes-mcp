@@ -42,18 +42,12 @@ case .server:
 }
 
 let instructions = """
-    Apple Notes on this Mac. Start with overview to see folders, then overview with a folder or \
-    search to find notes, then read_note (by id, or by exact title when the user names a note). read_note returns Markdown and a version; pass the version \
-    back when writing so a note edited in the meantime is not overwritten (update_note requires it).
-    Prefer edit_note for small changes and append_to_note for additions; update_note rewrites the \
-    whole note. One note paragraph is one Markdown line, and a blank line is an empty paragraph.
-    Formatting: # title (the first line), ## heading, ### subheading, * bullet, - dash, 1. numbered, \
-    - [ ] / - [x] checklist, > quote, ``` code, **bold**, *italic*, ~~strike~~, <u>underline</u>, \
-    <mark>highlight</mark>, [text](url), tables as | a | b |. Underscores are plain text.
-    Keep ![…](attachment:…) placeholders as they are: attachments cannot be added or removed here.
-    When read_note says a note has no description, call describe_note with a one-line summary; \
-    overview shows these (~ marks an automatic one). When asked to describe many notes, use overview \
-    with undescribed: true and pass all the summaries to describe_note in one call.
+    Apple Notes on this Mac. Find notes with overview or search, then read_note. Pass read_note's \
+    version back when writing. Prefer edit_note for small changes and append_to_note for additions.
+    One note paragraph is one Markdown line. Formatting: # title, ## heading, ### subheading, \
+    * - 1. lists, - [ ] / - [x] checklist, > quote, ``` code, **bold**, *italic*, ~~strike~~, \
+    <u>underline</u>, <mark>highlight</mark>, [link](url), | tables |. Keep ![…](attachment:…) placeholders.
+    To describe many notes: overview with undescribed: true, then one describe_note call.
     """
 
 // While set (development and checks), writes only touch notes whose title starts with it.
