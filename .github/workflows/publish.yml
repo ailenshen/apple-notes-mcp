@@ -1,5 +1,8 @@
 name: Publish to npm
 
+# Pushing a v* tag (made by scripts/release.sh) builds the signed app on macOS and publishes
+# npm/ to npm. npm Trusted Publishing (OIDC) is bound to this file name on npmjs.com: renaming
+# the file means updating the Trusted Publisher settings there. No npm token is stored.
 on:
   push:
     tags:
@@ -7,21 +10,67 @@ on:
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    runs-on: macos-26
     permissions:
       contents: write
       id-token: write
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check the tag matches npm/package.json
+        run: |
+          version=$(node -p "require('./npm/package.json').version")
+          [ "v$version" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME does not match version $version"; exit 1; }
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      # The signing certificate is the identity macOS ties users' permissions to. Releases
+      # are never published unsigned: an ad-hoc build would make every user grant again.
+      - name: Import the signing certificate into a temporary keychain
+        env:
+          P12: ${{ secrets.SIGNING_CERTIFICATE_P12 }}
+          P12_PASSWORD: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
+        run: |
+          [ -n "$P12" ] || { echo "SIGNING_CERTIFICATE_P12 secret is missing"; exit 1; }
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password=$(uuidgen)
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/signing.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/signing.p12" -k "$keychain" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/signing.p12"
+
+      - name: Build and sign the app
+        run: |
+          VERSION="$VERSION" scripts/build-app.sh
+          codesign -d -r- dist/AppleNotesMCP.app 2>&1 | grep -q 'certificate leaf' || { echo "app is not signed with the certificate"; exit 1; }
+
+      - name: Assemble the npm package
+        run: |
+          cp -R dist/AppleNotesMCP.app npm/
+          cp README.md LICENSE npm/
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-      # Trusted publishing (OIDC) needs npm 11.5.1 or newer; no NPM_TOKEN secret is used.
+      # Trusted publishing (OIDC) needs npm 11.5.1 or newer.
       - run: npm install -g npm@^11.5.1
-      - run: npm install
-      - run: npm run build
-      - run: npm publish --access public
+      - name: Publish (pre-releases go to the "next" tag)
+        working-directory: npm
+        run: |
+          case "$VERSION" in
+            *-*) npm publish --access public --tag next ;;
+            *) npm publish --access public ;;
+          esac
+
       - uses: softprops/action-gh-release@v2
         with:
+          prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
+
+      - name: Remove the temporary keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true

@@ -22,7 +22,7 @@ func writeResult(_ body: () async throws -> ToolResult) async throws -> ToolResu
     } catch let error as MCPError {
         throw error
     } catch let error as NotesError {
-        return ToolResult(error.description, isError: true)
+        return ToolResult(permissionHint(error), isError: true)
     }
 }
 

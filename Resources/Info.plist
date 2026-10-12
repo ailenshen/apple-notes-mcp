@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The bundle id and the signing certificate are the identity macOS grants permissions
+	     to. Changing either one makes every user grant them again. -->
+	<key>CFBundleIdentifier</key>
+	<string>com.ailenshen.apple-notes-mcp</string>
+	<key>CFBundleName</key>
+	<string>Apple Notes MCP</string>
+	<key>CFBundleDisplayName</key>
+	<string>Apple Notes MCP</string>
+	<key>CFBundleExecutable</key>
+	<string>AppleNotesMCP</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>__VERSION__</string>
+	<key>CFBundleVersion</key>
+	<string>__VERSION__</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>26.0</string>
+	<!-- No Dock icon while serving MCP; the setup window switches to a regular app itself. -->
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Apple Notes MCP asks Notes to upload your edits to iCloud and to move notes you delete to Recently Deleted.</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>MIT License</string>
+</dict>
+</plist>

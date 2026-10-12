@@ -1,5 +1,6 @@
 import Foundation
 import MCPCore
+import Synchronization
 import NotesKit
 
 /// Everything the tools share. All members are Sendable; NotesKit isolates the rest.
@@ -33,7 +34,30 @@ func notesResult(_ body: () async throws -> String) async throws -> ToolResult {
     } catch let error as MCPError {
         throw error
     } catch let error as NotesError {
-        return ToolResult(error.description, isError: true)
+        return ToolResult(permissionHint(error), isError: true)
+    }
+}
+
+/// Missing permissions open the setup window once per process and say so in the result.
+func permissionHint(_ error: NotesError) -> String {
+    guard case .noAccess = error else { return error.description }
+    if PermissionPrompt.shown.testAndSet() { return error.description }
+    Onboarding.openFromServer()
+    return error.description + ". The Apple Notes MCP setup window has been opened on this Mac: grant the permission there, then try again."
+}
+
+enum PermissionPrompt {
+    static let shown = OnceFlag()
+}
+
+/// A flag that reports whether it was already set, safely across threads.
+final class OnceFlag: Sendable {
+    private let value = Mutex(false)
+    func testAndSet() -> Bool {
+        value.withLock { set in
+            defer { set = true }
+            return set
+        }
     }
 }
 

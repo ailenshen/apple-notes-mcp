@@ -1,0 +1,16 @@
+{
+  "name": "@ailenshen/apple-notes-mcp",
+  "version": "2.0.0-beta.1",
+  "description": "Read and edit Apple Notes from AI assistants over MCP: native formatting, in-place edits, tables, iCloud sync",
+  "keywords": ["mcp", "apple-notes", "notes", "macos", "claude"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ailenshen/apple-notes-mcp.git"
+  },
+  "license": "MIT",
+  "os": ["darwin"],
+  "bin": {
+    "apple-notes-mcp": "bin/apple-notes-mcp"
+  },
+  "files": ["bin", "AppleNotesMCP.app", "README.md", "LICENSE"]
+}

@@ -1,0 +1,14 @@
+#!/bin/sh
+# npm entry point: runs the server inside the bundled, signed AppleNotesMCP.app, which then
+# re-launches itself so macOS grants permissions to the app rather than to npx or node.
+# Pass "setup" to open the permission window.
+set -e
+self=$0
+while [ -L "$self" ]; do  # npm links bin/ into node_modules/.bin
+  target=$(readlink "$self")
+  case $target in /*) self=$target ;; *) self=$(dirname "$self")/$target ;; esac
+done
+app="$(cd "$(dirname "$self")/.." && pwd -P)/AppleNotesMCP.app"
+binary="$app/Contents/MacOS/AppleNotesMCP"
+[ -x "$binary" ] || chmod +x "$binary"
+exec "$binary" "$@"

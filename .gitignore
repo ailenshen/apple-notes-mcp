@@ -1,10 +1,11 @@
-node_modules/
+.build/
+.swiftpm/
 dist/
-.dist-test/
-package-lock.json
+# Assembled by the publish workflow
+npm/AppleNotesMCP.app
+npm/README.md
+npm/LICENSE
 *.tgz
 .DS_Store
 .claude/
 CLAUDE.md
-.build/
-.swiftpm/
