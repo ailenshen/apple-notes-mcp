@@ -76,7 +76,7 @@ Both are granted to **Apple Notes MCP**, not to Terminal, Claude or Node — so 
 |------|-------------|
 | `overview` | All folders with note counts; or one line per note in a folder, with a short description; or the notes still missing a description, with the start of their text |
 | `search` | Full-text search over titles and bodies, with the matching text |
-| `read_note` | The note as Markdown, plus a version to pass back when writing |
+| `read_note` | The note as Markdown, plus a version to pass back when writing; by id, or by exact title |
 | `describe_note` | Saves one-line descriptions, for one note or many at once, shown by `overview` |
 | `create_note` | A new note from Markdown |
 | `append_to_note` | Adds Markdown at the end, at the start, or at the end of a heading's section |
@@ -102,7 +102,7 @@ One note paragraph is one Markdown line, so reading a note and writing it back n
 | Table | `\| a \| b \|` (cells are plain text; an edit usually changes only the cells that differ, keeping formatting made in Notes, but a table you also edited in Notes recently is rebuilt so iCloud gets the change) |
 | Image, file, note link, hashtag | `![image](attachment:…)` — kept as is; cannot be added or removed |
 
-Locked notes are skipped. Shared notes and notes in Recently Deleted are read-only.
+Locked notes are skipped, and notes in Recently Deleted are read-only. Shared notes can be edited, unless they were shared with you read-only; edits merge with the other people's edits the way they do in Notes. Shared notes are not deleted from here, since that can remove them for everyone.
 
 ## How it works
 

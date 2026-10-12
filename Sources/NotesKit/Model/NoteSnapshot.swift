@@ -13,6 +13,7 @@ public struct NoteSnapshot: Sendable, Equatable {
     public var isPinned: Bool
     public var isLocked: Bool
     public var isShared: Bool
+    public var isSharedReadOnly: Bool
     public var isInTrash: Bool
     public var text: String
 }

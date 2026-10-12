@@ -21,6 +21,12 @@ func day(_ date: Date) -> String {
     date.formatted(.iso8601.year().month().day().dateSeparator(.dash))
 }
 
+/// Titles in lists are cut to keep each line short; the id identifies the note anyway.
+/// A note's title is its first line, which Notes keeps up to about 80 characters.
+func listTitle(_ title: String, limit: Int = 40) -> String {
+    title.count > limit ? String(title.prefix(limit - 1)) + "…" : title
+}
+
 func minute(_ date: Date) -> String {
     let f = DateFormatter()
     f.dateFormat = "yyyy-MM-dd HH:mm"
@@ -105,7 +111,7 @@ struct OverviewTool: Tool {
                     } else {
                         summary = "~ " + DescriptionIndex.extract(fromPlainText: bodies[note.id] ?? "", title: note.title)
                     }
-                    lines.append("\(note.id) | \(note.isPinned ? "📌 " : "")\(note.title) | \(day(note.modified)) | \(summary)")
+                    lines.append("\(note.id) | \(note.isPinned ? "📌 " : "")\(listTitle(note.title)) | \(day(note.modified)) | \(summary)")
                 }
                 return lines.joined(separator: "\n")
             }
@@ -144,7 +150,7 @@ struct OverviewTool: Tool {
         let bodies = try await notes.search.bodies(ids: Set(shown.map(\.id)))
         var lines = ["\(pending.count) notes\(where_) have no current description\(pending.count > shown.count ? " (showing the \(shown.count) most recently modified)" : ""):"]
         for note in shown {
-            lines.append("\(note.id) | \(note.title) | \(note.folderPath) | \(day(note.modified))")
+            lines.append("\(note.id) | \(listTitle(note.title)) | \(note.folderPath) | \(day(note.modified))")
             lines.append("  " + Self.opening(of: bodies[note.id] ?? "", title: note.title))
         }
         lines.append("Write one line per note with describe_note, several notes per call.")
@@ -195,7 +201,7 @@ struct SearchTool: Tool {
             if hits.isEmpty { return "No notes match \"\(query)\"." }
             var lines = ["\(total) notes match \"\(query)\"\(total > hits.count ? " (showing \(hits.count))" : ""):"]
             for hit in hits {
-                lines.append("\(hit.id) | \(hit.title) | \(hit.folderPath) | \(day(hit.modified))")
+                lines.append("\(hit.id) | \(listTitle(hit.title)) | \(hit.folderPath) | \(day(hit.modified))")
                 lines.append("  \(hit.snippet)")
             }
             return lines.joined(separator: "\n")
@@ -209,18 +215,34 @@ struct ReadNoteTool: Tool {
     let title: String? = "Read a note"
     let description = """
         Returns the note as Markdown, one note paragraph per line, after a header with its version. \
-        Pass the version back when you change the note.
+        Pass the version back when you change the note. Give id, or title when the user names a note: \
+        an exact title (ignoring case) reads it directly, and several notes with that title are listed.
         """
-    let inputSchema = schema(["id": stringProperty("Note id from overview or search")], required: ["id"])
+    let inputSchema = schema([
+        "id": stringProperty("Note id from overview or search"),
+        "title": stringProperty("The note's exact title, instead of id"),
+    ])
     let annotations = ToolAnnotations.readOnly
 
     func call(_ arguments: [String: JSONValue]) async throws -> ToolResult {
-        let id = try Arguments(arguments).string("id")
+        let args = Arguments(arguments)
+        let givenID = try args.optionalString("id"), givenTitle = try args.optionalString("title")
+        guard (givenID == nil) != (givenTitle == nil) else { throw MCPError.invalidParams("give either id or title") }
         return try await notesResult {
+            var id = givenID ?? ""
+            if let givenTitle {
+                let matches = try await notes.repository.notes(titled: givenTitle)
+                if matches.isEmpty { return "No note is titled \"\(givenTitle)\". Use search to find it." }
+                if matches.count > 1 {
+                    return (["\(matches.count) notes are titled \"\(givenTitle)\"; read one by id:"]
+                        + matches.map { "\($0.id) | \($0.folderPath) | \(day($0.modified))" }).joined(separator: "\n")
+                }
+                id = matches[0].id
+            }
             let note = try await notes.repository.note(id: id)
             let blocks = try await notes.repository.blocks(id: id)
             var header = "id: \(id) | version: \(NotesRepository.version(of: blocks)) | folder: \(note.folderPath) | modified: \(minute(note.modified))"
-            if note.isShared { header += " | shared (read-only)" }
+            if note.isShared { header += note.isSharedReadOnly ? " | shared with you read-only" : " | shared" }
             if note.isInTrash { header += " | in Recently Deleted (read-only)" }
             var text = header + "\n---\n" + MarkdownRenderer.render(blocks)
             let description = try await notes.index.get(id)

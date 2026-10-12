@@ -43,6 +43,10 @@ note_id = re.search(r"id: ([0-9A-F-]{36})", text).group(1) if not err else ""
 err, text = call("search", query=f"zebra{tag}")
 check("search finds the new note", not err and note_id in text, text)
 
+err, text = call("read_note", title=title.upper())
+check("read_note by title, ignoring case", not err and f"id: {note_id}" in text, text[:200])
+err, text = call("read_note", title=title + " missing")
+check("read_note by a title nobody has", not err and "No note is titled" in text, text)
 err, text = call("read_note", id=note_id)
 version = re.search(r"version: (\w+)", text).group(1) if not err else ""
 check("read_note returns Markdown and asks for a description", not err and "**bold**" in text and "describe_note" in text, text)

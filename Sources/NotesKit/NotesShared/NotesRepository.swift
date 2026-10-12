@@ -72,6 +72,18 @@ public final class NotesRepository {
         }
     }
 
+    /// Readable notes whose title equals `title`, ignoring case and surrounding spaces,
+    /// newest first. Notes in Recently Deleted are left out.
+    public func notes(titled title: String) throws(NotesError) -> [NoteSnapshot] {
+        let store = try store()
+        store.refresh()
+        let wanted = title.trimmingCharacters(in: .whitespaces)
+        let found = try fetch(store, "ICNote", NSPredicate(format: "title ==[c] %@ AND markedForDeletion == NO", wanted))
+        return try found.map { note throws(NotesError) in try snapshot(of: note, includeText: false) }
+            .filter { !$0.isInTrash && !$0.isLocked }
+            .sorted { $0.modified > $1.modified }
+    }
+
     public func cloudState(id: String) throws(NotesError) -> CloudState {
         let store = try store()
         store.refresh()
@@ -218,7 +230,9 @@ public final class NotesRepository {
         if (note.value(forKey: "isPasswordProtected") as? Bool) == true { throw .refused("locked notes cannot be changed") }
         if (note.value(forKey: "markedForDeletion") as? Bool) == true { throw .refused("this note is deleted") }
         if Self.isTrash(note.value(forKey: "folder") as? NSManagedObject) { throw .refused("this note is in Recently Deleted; restore it in Notes first") }
-        if Self.isShared(note) { throw .refused("shared notes are read-only here") }
+        // Shared notes are edited like any other: edits are character-level CRDT changes that
+        // merge with other participants' edits (verified 2026-10-12 on a note the owner shares).
+        if Self.isSharedReadOnly(note) { throw .refused("this note is shared with you read-only") }
         if let prefix = writeGuardTitlePrefix, (note.value(forKey: "title") as? String)?.hasPrefix(prefix) != true {
             throw .refused("refusing to write: only notes titled \"\(prefix)…\" may be written while the write guard is on")
         }
@@ -332,6 +346,7 @@ public final class NotesRepository {
             isPinned: (note.value(forKey: "isPinned") as? Bool) ?? false,
             isLocked: (note.value(forKey: "isPasswordProtected") as? Bool) ?? false,
             isShared: Self.isShared(note),
+            isSharedReadOnly: Self.isSharedReadOnly(note),
             isInTrash: Self.isTrash(folder) || deletedHere.contains(note.value(forKey: "identifier") as? String ?? ""),
             text: text)
     }
@@ -419,6 +434,11 @@ public final class NotesRepository {
     /// Shared through iCloud, directly or through a shared folder. Shared notes are read-only
     /// here: in-place edits on them are not verified.
     /// 当验证过共享笔记的原地修改与同步后，放开共享笔记的写入。
+    /// Shared with the current user without edit permission (directly or through a folder).
+    static func isSharedReadOnly(_ note: NSManagedObject) -> Bool {
+        (note.value(forKey: "isSharedReadOnly") as? Bool) == true
+    }
+
     static func isShared(_ note: NSManagedObject) -> Bool {
         if note.value(forKey: "serverShareData") != nil { return true }
         var folder = note.value(forKey: "folder") as? NSManagedObject
@@ -448,7 +468,9 @@ public final class NotesRepository {
     public func delete(id: String) async throws(NotesError) {
         let snapshot = try note(id: id)
         if snapshot.isInTrash { throw .refused("the note is already in Recently Deleted; deleting it again would erase it for good") }
-        if snapshot.isShared { throw .refused("shared notes are read-only here") }
+        // Deleting a note you share removes it for every participant, so that stays a choice
+        // made in Notes. 当能区分"仅自己移除"与"为所有人删除"并让用户确认时，再开放。
+        if snapshot.isShared { throw .refused("shared notes are not deleted here: deleting a shared note can remove it for everyone it is shared with; delete it in Notes") }
         if let prefix = writeGuardTitlePrefix, !snapshot.title.hasPrefix(prefix) {
             throw .refused("refusing to delete: only notes titled \"\(prefix)…\" may be changed while the write guard is on")
         }

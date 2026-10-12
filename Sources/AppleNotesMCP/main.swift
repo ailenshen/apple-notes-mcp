@@ -43,7 +43,7 @@ case .server:
 
 let instructions = """
     Apple Notes on this Mac. Start with overview to see folders, then overview with a folder or \
-    search to find notes, then read_note. read_note returns Markdown and a version; pass the version \
+    search to find notes, then read_note (by id, or by exact title when the user names a note). read_note returns Markdown and a version; pass the version \
     back when writing so a note edited in the meantime is not overwritten (update_note requires it).
     Prefer edit_note for small changes and append_to_note for additions; update_note rewrites the \
     whole note. One note paragraph is one Markdown line, and a blank line is an empty paragraph.
