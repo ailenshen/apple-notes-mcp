@@ -26,7 +26,7 @@ enum Loader {
         "ICNote": ["identifier", "title", "folder", "modificationDate", "markedForDeletion", "isPasswordProtected", "attachments"],
         "ICInlineAttachment": ["identifier", "altText", "tokenContentIdentifier"],
         "ICAttachment": ["identifier", "typeUTI", "markedForDeletion", "mergeableData"],
-        "ICFolder": ["identifier", "title"],
+        "ICFolder": ["identifier", "title", "parent", "markedForDeletion", "needsInitialFetchFromCloud"],
     ]
 
     static func check(model: NSManagedObjectModel) throws(NotesError) {

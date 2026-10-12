@@ -383,13 +383,21 @@ public final class NotesRepository {
 
     var hasMultipleAccounts = false
 
+    /// Folders Notes shows, as in `+[ICFolder predicateForVisibleObjects]`. A folder that
+    /// "needs initial fetch from cloud" is a placeholder Notes made for a record it never
+    /// downloaded (no parent, no notes; usually a folder deleted elsewhere), and Notes hides it.
+    /// Notes' predicate also requires `owner.didChooseToMigrate`, which only matters for
+    /// accounts never upgraded to the iCloud format; those are not supported here anyway.
+    /// 当需要支持未迁移的旧账户时，改为直接调用 Notes 的 predicateForVisibleObjects。
+    static let visibleFolder = "markedForDeletion == NO AND needsInitialFetchFromCloud == NO"
+
     /// User folders as a flat list in path order.
     public func folders() throws(NotesError) -> [FolderSnapshot] {
         let store = try store()
         store.refresh()
         let accounts = try fetch(store, "ICAccount", NSPredicate(format: "markedForDeletion == NO"))
         hasMultipleAccounts = accounts.count > 1
-        let folders = try fetch(store, "ICFolder", NSPredicate(format: "markedForDeletion == NO AND folderType != 1 AND smartFolderQueryJSON == nil"))
+        let folders = try fetch(store, "ICFolder", NSPredicate(format: Self.visibleFolder + " AND folderType != 1 AND smartFolderQueryJSON == nil"))
         let notes = try fetch(store, "ICNote", NSPredicate(format: "markedForDeletion == NO"))
         var counts: [NSManagedObjectID: Int] = [:]
         for note in notes where !deletedHere.contains(note.value(forKey: "identifier") as? String ?? "") {
@@ -436,7 +444,7 @@ public final class NotesRepository {
     public func folderPathsByPrimaryKey() throws(NotesError) -> [Int64: String] {
         let store = try store()
         store.refresh()
-        let folders = try fetch(store, "ICFolder", NSPredicate(format: "markedForDeletion == NO AND folderType != 1 AND smartFolderQueryJSON == nil"))
+        let folders = try fetch(store, "ICFolder", NSPredicate(format: Self.visibleFolder + " AND folderType != 1 AND smartFolderQueryJSON == nil"))
         var out: [Int64: String] = [:]
         for folder in folders {
             let last = folder.objectID.uriRepresentation().lastPathComponent

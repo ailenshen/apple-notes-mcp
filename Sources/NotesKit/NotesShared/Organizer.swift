@@ -95,7 +95,7 @@ extension NotesRepository {
         } else {
             guard let account = try defaultAccount(in: store) else { throw .failed("no Notes account found") }
             container = "account id \"\(account.objectID.uriRepresentation().absoluteString)\""
-            siblings = try fetch(store, "ICFolder", NSPredicate(format: "markedForDeletion == NO AND parent == nil AND account == %@ AND folderType == 0", account))
+            siblings = try fetch(store, "ICFolder", NSPredicate(format: Self.visibleFolder + " AND parent == nil AND account == %@ AND folderType == 0", account))
         }
         if siblings.contains(where: { ($0.value(forKey: "title") as? String)?.lowercased() == name.lowercased() }) {
             throw .refused("a folder named \"\(name)\" already exists there")
@@ -123,7 +123,7 @@ extension NotesRepository {
         if let parent = folder.value(forKey: "parent") as? NSManagedObject {
             siblings = try children(of: parent, in: store)
         } else {
-            siblings = try fetch(store, "ICFolder", NSPredicate(format: "markedForDeletion == NO AND parent == nil AND account == %@ AND folderType == 0",
+            siblings = try fetch(store, "ICFolder", NSPredicate(format: Self.visibleFolder + " AND parent == nil AND account == %@ AND folderType == 0",
                                                                 (folder.value(forKey: "account") as? NSManagedObject) ?? NSNull()))
         }
         if siblings.contains(where: { $0 != folder && ($0.value(forKey: "title") as? String)?.lowercased() == name.lowercased() }) {
@@ -180,7 +180,7 @@ extension NotesRepository {
     }
 
     private func children(of folder: NSManagedObject, in store: ReadStore) throws(NotesError) -> [NSManagedObject] {
-        try fetch(store, "ICFolder", NSPredicate(format: "markedForDeletion == NO AND parent == %@", folder))
+        try fetch(store, "ICFolder", NSPredicate(format: Self.visibleFolder + " AND parent == %@", folder))
     }
 
     private func defaultAccount(in store: ReadStore) throws(NotesError) -> NSManagedObject? {
