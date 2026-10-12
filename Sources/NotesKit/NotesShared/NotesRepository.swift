@@ -100,7 +100,7 @@ public final class NotesRepository {
         var matches: [String] = []
         for entity in entities {
             if try !fetch(store, entity, NSPredicate(format: "identifier == %@", wanted)).isEmpty { return wanted }
-            guard wanted.count >= 6 else { continue }
+            guard wanted.count >= 4 else { continue }
             matches += try fetch(store, entity, NSPredicate(format: "identifier BEGINSWITH[c] %@", wanted))
                 .compactMap { $0.value(forKey: "identifier") as? String }
         }
@@ -396,11 +396,18 @@ public final class NotesRepository {
             if let folder = note.value(forKey: "folder") as? NSManagedObject { counts[folder.objectID, default: 0] += 1 }
         }
         return folders.map { folder in
-            FolderSnapshot(
+            let names = Self.names(of: folder, multipleAccounts: hasMultipleAccounts)
+            return FolderSnapshot(
                 id: folder.value(forKey: "identifier") as? String ?? "",
-                path: Self.path(of: folder, multipleAccounts: hasMultipleAccounts),
-                noteCount: counts[folder.objectID] ?? 0)
-        }.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+                path: FolderPath.join(names),
+                noteCount: counts[folder.objectID] ?? 0,
+                name: folder.value(forKey: "title") as? String ?? "",
+                names: names,
+                parentID: (folder.value(forKey: "parent") as? NSManagedObject)?.value(forKey: "identifier") as? String)
+        }.sorted { a, b in
+            for (p, q) in zip(a.names, b.names) where p != q { return p.localizedStandardCompare(q) == .orderedAscending }
+            return a.names.count < b.names.count
+        }
     }
 
     /// Notes in one folder, pinned first, then newest first. Text is not loaded.
@@ -447,15 +454,23 @@ public final class NotesRepository {
         let byPrefix = all.filter { ShortID.of($0.id) == reference }
         if byPrefix.count == 1 { return byPrefix[0] }
         let wanted = reference.trimmingCharacters(in: CharacterSet(charactersIn: "/ ")).lowercased()
-        let exact = all.filter { $0.path.lowercased() == wanted }
+        // As written in lists ("A/B\\/C"), or with a "/" inside a name left unescaped.
+        let exact = all.filter { $0.path.lowercased() == wanted || $0.names.joined(separator: "/").lowercased() == wanted }
         if exact.count == 1 { return exact[0] }
-        let byLeaf = all.filter { $0.path.lowercased().hasSuffix("/" + wanted) || $0.path.lowercased() == wanted }
+        let byLeaf = all.filter { f in
+            let raw = f.names.joined(separator: "/").lowercased()
+            return f.name.lowercased() == wanted || f.path.lowercased().hasSuffix("/" + wanted) || raw.hasSuffix("/" + wanted)
+        }
         if byLeaf.count == 1 { return byLeaf[0] }
-        if byLeaf.isEmpty { throw .notFound("folder \"\(reference)\"; call overview to see folder paths") }
-        throw .refused("folder \"\(reference)\" is ambiguous: " + byLeaf.map { "\($0.path) (\($0.id))" }.joined(separator: ", "))
+        if byLeaf.isEmpty { throw .notFound("folder \"\(reference)\"; call overview to see folders") }
+        throw .refused("folder \"\(reference)\" is ambiguous: " + byLeaf.map { "\($0.path) (id \(ShortID.of($0.id)))" }.joined(separator: ", "))
     }
 
     static func path(of folder: NSManagedObject, multipleAccounts: Bool) -> String {
+        FolderPath.join(names(of: folder, multipleAccounts: multipleAccounts))
+    }
+
+    static func names(of folder: NSManagedObject, multipleAccounts: Bool) -> [String] {
         var parts: [String] = []
         var current: NSManagedObject? = folder
         while let f = current {
@@ -465,7 +480,7 @@ public final class NotesRepository {
         if multipleAccounts, let account = (folder.value(forKey: "account") as? NSManagedObject)?.value(forKey: "name") as? String {
             parts.insert(account, at: 0)
         }
-        return parts.joined(separator: "/")
+        return parts
     }
 
     static func isTrash(_ folder: NSManagedObject?) -> Bool {

@@ -50,6 +50,11 @@ func unitChecks() {
     expect(lenient == [para(.subheading, [text("deep")]), para(.dash, [text("plus")]),
         para(.body, [text("bold ", .bold), text("both", [.bold, .italic]), text(" bold", .bold)]),
         para(.code, [text("code")])], "lenient parse: \(lenient)")
+    // Folder names may contain "/": paths escape it, and splitting respects that.
+    let names = ["Areas", "产品/远程/兼职/接单"]
+    expect(FolderPath.join(names) == "Areas/产品\\/远程\\/兼职\\/接单", "folder path escaping: \(FolderPath.join(names))")
+    expect(FolderPath.split(FolderPath.join(names)) == names, "folder path split: \(FolderPath.split(FolderPath.join(names)))")
+    expect(FolderPath.split(" Projects / Ideas ") == ["Projects", "Ideas"], "plain path split")
     // Short attachment ids: what read_note shows, and what a write maps back.
     let full = [para(.body, [text("pic "), .attachment(AttachmentRef(id: "4E847B23-CDE2-408A-9A26-4E8642E89BA3", kind: "image", label: "")),
                              .attachment(AttachmentRef(id: "10A0BC5E-7917-4E06-B07D-EEECA1E9E9F7", kind: "image", label: ""))])]

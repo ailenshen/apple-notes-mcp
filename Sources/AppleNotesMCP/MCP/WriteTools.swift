@@ -71,30 +71,56 @@ struct CreateNoteTool: Tool {
     }
 }
 
-/// Where appended blocks go: the end of a heading's section, just below the title, or the end.
-func insertionIndex(in blocks: [Block], heading: String?, atStart: Bool) throws(NotesError) -> Int {
-    func level(_ block: Block) -> Int? {
-        guard case .paragraph(let p) = block else { return nil }
-        switch p.kind {
-        case .title: return 1
-        case .heading: return 2
-        case .subheading: return 3
-        default: return nil
-        }
+/// Heading level of a block: 1 title, 2 heading, 3 subheading, nil otherwise.
+func headingLevel(_ block: Block) -> Int? {
+    guard case .paragraph(let p) = block else { return nil }
+    switch p.kind {
+    case .title: return 1
+    case .heading: return 2
+    case .subheading: return 3
+    default: return nil
     }
-    if let heading {
-        let wanted = heading.trimmingCharacters(in: CharacterSet(charactersIn: "# ")).lowercased()
-        let matches = blocks.indices.filter { i in
-            guard level(blocks[i]) != nil, case .paragraph(let p) = blocks[i] else { return false }
-            return p.plainText.trimmingCharacters(in: .whitespaces).lowercased() == wanted
+}
+
+/// The blocks of a heading's section: the heading itself, then everything up to the next
+/// heading of the same or a higher level. Matching ignores case and leading "#".
+func sectionRange(in blocks: [Block], heading: String) throws(NotesError) -> Range<Int> {
+    let wanted = heading.trimmingCharacters(in: CharacterSet(charactersIn: "# ")).lowercased()
+    let matches = blocks.indices.filter { i in
+        guard headingLevel(blocks[i]) != nil, case .paragraph(let p) = blocks[i] else { return false }
+        return p.plainText.trimmingCharacters(in: .whitespaces).lowercased() == wanted
+    }
+    guard let found = matches.first else {
+        let headings = blocks.compactMap { b -> String? in
+            guard headingLevel(b) ?? 1 > 1, case .paragraph(let p) = b else { return nil }
+            return p.plainText
         }
-        guard let found = matches.first else { throw .notFound("heading \"\(heading)\" in this note") }
-        guard matches.count == 1 else { throw .refused("\(matches.count) headings are called \"\(heading)\"; use replace instead") }
-        let own = level(blocks[found])!
-        var end = blocks.index(after: found)
-        while end < blocks.count, (level(blocks[end]) ?? Int.max) > own { end += 1 }
+        throw .notFound("heading \"\(heading)\" in this note" + (headings.isEmpty ? " (it has no headings)" : "; headings: " + headings.joined(separator: " | ")))
+    }
+    guard matches.count == 1 else { throw .refused("\(matches.count) headings are called \"\(heading)\"; use replace instead") }
+    let own = headingLevel(blocks[found])!
+    var end = blocks.index(after: found)
+    while end < blocks.count, (headingLevel(blocks[end]) ?? Int.max) > own { end += 1 }
+    return found..<end
+}
+
+/// Where inserted blocks go: under a heading, just below the title, or at the end.
+/// Under a heading, list items join the section's last list of the same kind, so a new
+/// checklist item stays with the checklist even when text follows it; anything else goes at
+/// the end of the section.
+func insertionIndex(in blocks: [Block], heading: String?, atStart: Bool, inserting: [Block] = []) throws(NotesError) -> Int {
+    if let heading {
+        let section = try sectionRange(in: blocks, heading: heading)
+        if case .paragraph(let first)? = inserting.first, let kind = listKind(first.kind),
+            let last = section.dropFirst().last(where: { i in
+                if case .paragraph(let p) = blocks[i] { return listKind(p.kind) == kind } else { return false }
+            })
+        {
+            return last + 1
+        }
+        var end = section.upperBound
         // Keep trailing empty lines of the section after the insertion.
-        while end > found + 1, case .paragraph(let p) = blocks[end - 1], p.kind == .body, p.content.isEmpty { end -= 1 }
+        while end > section.lowerBound + 1, case .paragraph(let p) = blocks[end - 1], p.kind == .body, p.content.isEmpty { end -= 1 }
         return end
     }
     if atStart {
@@ -104,6 +130,18 @@ func insertionIndex(in blocks: [Block], heading: String?, atStart: Bool) throws(
     var end = blocks.count
     while end > 1, case .paragraph(let p) = blocks[end - 1], p.kind == .body, p.content.isEmpty { end -= 1 }
     return end
+}
+
+/// Lists that read as one when adjacent: checklist items whether done or not, and each
+/// bullet style on its own.
+private func listKind(_ kind: ParagraphKind) -> String? {
+    switch kind {
+    case .checklist: "checklist"
+    case .bullet: "bullet"
+    case .dash: "dash"
+    case .numbered: "numbered"
+    default: nil
+    }
 }
 
 /// The line sharing the longest prefix with the first line of `needle`, to help the model
@@ -225,7 +263,7 @@ struct EditNoteTool: Tool {
                              "all": ["type": "boolean"]], required: ["old", "new"]),
         ],
         "insert": stringProperty("Markdown to add"),
-        "at": stringProperty("end (default), start, or a heading's text"),
+        "at": stringProperty("end (default), start, or a heading's text (list items join that section's list)"),
         "rewrite": stringProperty("The whole note as Markdown"),
     ], required: ["id"])
     let annotations = ToolAnnotations(destructive: true)
@@ -267,7 +305,7 @@ struct EditNoteTool: Tool {
                 }
                 if let insert {
                     let heading = at == "end" || at == "start" ? nil : at
-                    result.insert(contentsOf: insert, at: try insertionIndex(in: result, heading: heading, atStart: at == "start"))
+                    result.insert(contentsOf: insert, at: try insertionIndex(in: result, heading: heading, atStart: at == "start", inserting: insert))
                 }
                 return result
             }

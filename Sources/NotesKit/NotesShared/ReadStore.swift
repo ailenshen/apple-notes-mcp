@@ -55,7 +55,7 @@ final class ReadStore {
         } catch {
             throw .failed("fetch failed: \(error.localizedDescription)")
         }
-        guard let found else { throw .notFound(id) }
+        guard let found else { throw .notFound("note \(id)") }
         return found
     }
 }

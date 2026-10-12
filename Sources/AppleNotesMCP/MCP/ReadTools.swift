@@ -84,6 +84,7 @@ struct OverviewTool: Tool {
         "created_before": stringProperty("YYYY-MM-DD, exclusive"),
         "sort": sortProperty("Newest first by modified (default) or created, or by title"),
         "undescribed": ["type": "boolean", "description": "Only notes needing a description, with their opening text"],
+        "depth": ["type": "integer", "minimum": 1, "maximum": 10, "description": "Folder levels shown without other arguments (default 1)"],
         "limit": ["type": "integer", "minimum": 1, "maximum": 500, "description": "Default 30 (50 with undescribed)"],
     ])
     let annotations = ToolAnnotations.readOnly
@@ -95,6 +96,7 @@ struct OverviewTool: Tool {
         let window = try args.dateWindow(), createdWindow = try args.dateWindow("created")
         let order = try args.order()
         let limit = try args.int("limit", default: undescribed ? 50 : 30, range: 1...500)
+        let depth = try args.int("depth", default: 1, range: 1...10)
         return try await notesResult {
             let descriptions = try await notes.index.all()
             if folder != nil || undescribed || !window.isEmpty || !createdWindow.isEmpty || order != nil {
@@ -106,27 +108,35 @@ struct OverviewTool: Tool {
             for note in try await notes.repository.notes(inFolders: nil) where notes.isFresh(descriptions[note.id], modified: note.modified) {
                 described[note.folderID, default: 0] += 1
             }
-            return folderTree(folders, described: described)
+            return folderTree(folders, described: described, depth: depth)
         }
     }
 
-    /// Folders as an indented tree, "name (notes, described)": far shorter than full paths
-    /// and ids on every line. Ids are shown only for folders whose path is not unique.
-    private func folderTree(_ folders: [FolderSnapshot], described: [String: Int]) -> String {
+    /// Folders as an indented tree down to `depth`, "name (notes, described)". A folder at the
+    /// depth limit says how many subfolders and notes it hides, so the next call can go deeper.
+    /// Depth comes from the parent chain, never from splitting paths: names may contain "/".
+    /// Ids are shown only for folders whose path is not unique.
+    private func folderTree(_ folders: [FolderSnapshot], described: [String: Int], depth: Int) -> String {
         let paths = Dictionary(grouping: folders, by: \.path)
-        let ordered = folders.sorted { a, b in
-            let x = a.path.split(separator: "/"), y = b.path.split(separator: "/")
-            for (p, q) in zip(x, y) where p != q { return p.localizedStandardCompare(q) == .orderedAscending }
-            return x.count < y.count
+        func isInside(_ f: FolderSnapshot, _ parent: FolderSnapshot) -> Bool {
+            f.names.count > parent.names.count && Array(f.names.prefix(parent.names.count)) == parent.names
         }
         let total = folders.reduce(0) { $0 + $1.noteCount }, totalDescribed = described.values.reduce(0, +)
-        var lines = ["\(total) notes in \(folders.count) folders, \(totalDescribed) described. Refer to a folder by its path, such as Parent/Child."]
-        for f in ordered {
-            let parts = f.path.split(separator: "/")
+        let deeper = folders.contains { $0.names.count > depth }
+        var lines = ["\(total) notes in \(folders.count) folders, \(totalDescribed) described."
+            + (deeper ? " Showing \(depth) level\(depth == 1 ? "" : "s"); pass depth for more, or a folder to list its notes." : "")
+            + " Refer to a folder by its path, such as Parent/Child."]
+        for f in folders where f.names.count <= depth {
             var counts = "\(f.noteCount)"
             if let d = described[f.id], d > 0 { counts += ", \(d) described" }
+            if f.names.count == depth {
+                let hidden = folders.filter { isInside($0, f) }
+                if !hidden.isEmpty {
+                    counts += "; \(hidden.count) subfolder\(hidden.count == 1 ? "" : "s"), \(f.noteCount + hidden.reduce(0) { $0 + $1.noteCount }) in all"
+                }
+            }
             let id = (paths[f.path]?.count ?? 0) > 1 ? " [id \(ShortID.of(f.id))]" : ""
-            lines.append(String(repeating: "  ", count: parts.count - 1) + "\(parts.last ?? "") (\(counts))\(id)")
+            lines.append(String(repeating: "  ", count: f.names.count - 1) + "\(f.name) (\(counts))\(id)")
         }
         return lines.joined(separator: "\n")
     }
@@ -141,10 +151,15 @@ struct OverviewTool: Tool {
     ) async throws -> String {
         var scope: Set<String>?
         var scopeName = "all folders"
+        var subfolderLine: String?
         if let folder {
             let resolved = try await notes.repository.resolveFolder(folder)
-            scope = Set(try await notes.repository.folders().filter { $0.id == resolved.id || $0.path.hasPrefix(resolved.path + "/") }.map(\.id))
+            let all = try await notes.repository.folders()
+            let inside = all.filter { $0.names.count > resolved.names.count && Array($0.names.prefix(resolved.names.count)) == resolved.names }
+            scope = Set([resolved.id] + inside.map(\.id))
             scopeName = resolved.path
+            let direct = inside.filter { $0.names.count == resolved.names.count + 1 }
+            if !direct.isEmpty { subfolderLine = "Subfolders: " + direct.map { "\($0.name) (\($0.noteCount))" }.joined(separator: ", ") }
         }
         var list = try await notes.repository.notes(inFolders: scope)
         list = list.filter { window.contains($0.modified) && created.contains($0.created) }
@@ -162,7 +177,8 @@ struct OverviewTool: Tool {
         let what = undescribed ? "notes without a current description" : "notes"
         let range = [window.label("modified"), created.label("created")].filter { !$0.isEmpty }.joined(separator: ", ")
         var lines = ["\(scopeName)\(range.isEmpty ? "" : " " + range) — \(list.count) \(what)\(list.count > shown.count ? ", showing \(shown.count)" : "")"]
-        if list.isEmpty { return lines[0] }
+        if let subfolderLine { lines.append(subfolderLine) }
+        if list.isEmpty { return lines.joined(separator: "\n") }
         let dateName = order == .created ? "created" : "modified"
         lines.append("id | title | " + (showFolder ? "folder | " : "") + "\(dateName) | size" + (undescribed ? "" : " | description"))
         for note in shown {
@@ -280,11 +296,13 @@ struct ReadNoteTool: Tool {
     let notes: NotesContext
     let name = "read_note"
     let title: String? = "Read a note"
-    let description = "Notes as Markdown, with the version to pass back when writing. By id, several ids, or exact title."
+    let description = "Notes as Markdown, with the version to pass back when writing. By id, several ids, or exact title; a long note can be read by section, or as an outline first."
     let inputSchema = schema([
         "id": stringProperty("Note id"),
         "ids": ["type": "array", "items": ["type": "string"], "maxItems": 20, "description": "Several note ids, read in one call"],
         "title": stringProperty("Exact title, instead of id"),
+        "section": stringProperty("Only this heading's section"),
+        "outline": ["type": "boolean", "description": "Only the headings, with each section's size"],
     ])
     let annotations = ToolAnnotations.readOnly
 
@@ -297,6 +315,9 @@ struct ReadNoteTool: Tool {
             throw MCPError.invalidParams("give one of id, ids or title")
         }
         guard givenIDs.count <= 20 else { throw MCPError.invalidParams("ids takes at most 20 notes") }
+        let section = try args.optionalString("section")
+        let outline = try args.bool("outline", default: false)
+        if section != nil && outline { throw MCPError.invalidParams("give section or outline, not both") }
         return try await notesResult {
             var refs = givenID.map { [$0] } ?? givenIDs
             if let givenTitle {
@@ -311,7 +332,7 @@ struct ReadNoteTool: Tool {
             var parts: [String] = []
             for ref in refs {
                 do {
-                    parts.append(try await render(try await notes.repository.resolveNoteID(ref)))
+                    parts.append(try await render(try await notes.repository.resolveNoteID(ref), section: section, outline: outline))
                 } catch let error as NotesError where refs.count > 1 {
                     parts.append("\(ref): \(error)")
                 }
@@ -322,14 +343,32 @@ struct ReadNoteTool: Tool {
 
     /// Header (id, version, folder, date, flags), then the Markdown. Attachment ids are
     /// shortened; writes map them back.
-    private func render(_ id: String) async throws -> String {
+    private func render(_ id: String, section: String?, outline: Bool) async throws -> String {
         let note = try await notes.repository.note(id: id)
         let blocks = try await notes.repository.blocks(id: id)
         var header = "id: \(ShortID.of(id)) | version: \(NotesRepository.version(of: blocks)) | folder: \(note.folderPath) | modified: \(minute(note.modified))"
         if note.isShared { header += note.isSharedReadOnly ? " | shared with you read-only" : " | shared" }
         if note.isInTrash { header += " | in Recently Deleted (read-only)" }
         if !notes.isFresh(try await notes.index.get(id), modified: note.modified) { header += " | needs description" }
-        return header + "\n---\n" + MarkdownRenderer.render(blocks.mappingAttachmentIDs(ShortID.of))
+        let shown = blocks.mappingAttachmentIDs(ShortID.of)
+        if outline {
+            // Sizes are of each section as read_note would return it.
+            var lines = [header + " | \(MarkdownRenderer.render(shown).count) chars", "---"]
+            let firstHeading = shown.indices.first { headingLevel(shown[$0]).map { $0 > 1 } ?? false } ?? shown.count
+            let intro = MarkdownRenderer.render(Array(shown[..<firstHeading])).count
+            if intro > 0 { lines.append("(before the first heading) — \(intro) chars") }
+            for i in shown.indices where (headingLevel(shown[i]) ?? 1) > 1 {
+                guard case .paragraph(let p) = shown[i] else { continue }
+                let range = try sectionRange(in: shown, heading: p.plainText)
+                lines.append(String(repeating: "#", count: headingLevel(shown[i])!) + " \(p.plainText) — \(MarkdownRenderer.render(Array(shown[range])).count) chars")
+            }
+            return lines.joined(separator: "\n")
+        }
+        if let section {
+            let range = try sectionRange(in: shown, heading: section)
+            return header + " | section only\n---\n" + MarkdownRenderer.render(Array(shown[range]))
+        }
+        return header + "\n---\n" + MarkdownRenderer.render(shown)
     }
 }
 

@@ -32,11 +32,13 @@ def check(label, ok, detail=""):
     failures += not ok
 
 err, text = call("overview")
-check("overview lists folders as a tree", not err and "\nNotes (" in text and "notes in" in text, text[:300])
+check("overview lists the top folders as a tree", not err and "\nNotes (" in text and "notes in" in text, text[:300])
+err, text = call("overview", depth=10)
+check("overview depth shows every level", not err and "Showing" not in text.splitlines()[0], text[:300])
 
 tag = uuid.uuid4().hex[:8]
 title = f"MCP Test e2e {tag}"
-err, text = call("create_note", markdown=f"# {title}\nFirst line with **bold** and zebra{tag}.\n\n## Tasks\n- [ ] one\n\n## Notes\nEnd.")
+err, text = call("create_note", markdown=f"# {title}\nFirst line with **bold** and zebra{tag}.\n\n## Tasks\n- [ ] one\nText after the list.\n\n## Notes\nEnd.")
 check("create_note", not err and "uploaded to iCloud" in text, text)
 # Results show 8-character id prefixes, and every tool accepts them.
 note_id = re.search(r"id: ([0-9A-F]{8})\b", text).group(1) if not err else ""
@@ -47,6 +49,14 @@ check("search finds the new note", not err and short in text, text)
 
 err, text = call("read_note", title=title.upper())
 check("read_note by title, ignoring case", not err and f"id: {short}" in text, text[:200])
+err, text = call("read_note", id=note_id[:4])
+check("a 4-character id prefix works (or names the candidates)", (not err and f"id: {short}" in text) or "matches several" in text, text[:200])
+err, text = call("read_note", id="0000zz")
+check("a missing id reads 'Not found: note …'", err and "Not found: note 0000zz" in text, text)
+err, text = call("read_note", id=note_id, outline=True)
+check("read_note outline lists headings with sizes", not err and "## Tasks — " in text and "## Notes — " in text, text)
+err, text = call("read_note", id=note_id, section="tasks")
+check("read_note reads one section", not err and "## Tasks" in text and "## Notes" not in text, text)
 err, text = call("read_note", ids=[note_id, "MCP-missing-id"])
 check("read_note reads several ids, reporting a missing one", not err and f"id: {short}" in text and "MCP-missing-id" in text, text[:300])
 err, text = call("read_note", title=title + " missing")
@@ -78,7 +88,8 @@ check("overview shows the description", not err and "End-to-end test note" in te
 err, text = call("edit_note", id=note_id, insert="- [ ] two", at="Tasks", version=version)
 check("edit_note insert under a heading", not err, text)
 err, text = call("read_note", id=note_id)
-check("appended line sits in its section", "- [ ] one\n- [ ] two\n\n## Notes" in text, text)
+check("an inserted list item joins the section's list, before the text after it",
+      "- [ ] one\n- [ ] two\nText after the list.\n\n## Notes" in text, text)
 version = re.search(r"version: (\w+)", text).group(1)
 
 err, text = call("edit_note", id=note_id, replace=[{"old": "- [ ] one", "new": "- [x] one"}, {"old": "End.", "new": "The end."}],

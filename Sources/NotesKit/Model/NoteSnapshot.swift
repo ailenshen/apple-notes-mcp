@@ -22,8 +22,35 @@ public struct NoteSnapshot: Sendable, Equatable {
 /// account name when there is more than one account.
 public struct FolderSnapshot: Sendable, Equatable {
     public var id: String
+    /// "Parent/Child", with any "/" inside a name written "\/" (see `FolderPath`).
     public var path: String
     public var noteCount: Int
+    /// The folder's own name, as in Notes.
+    public var name: String = ""
+    /// Names from the top-level folder down to this one (account name first with several accounts).
+    public var names: [String] = []
+    public var parentID: String?
+}
+
+/// Folder paths join names with "/". A name may itself contain "/" (Notes allows it), so it
+/// is written "\/" inside a path, and splitting respects that.
+public enum FolderPath {
+    public static func join(_ names: [String]) -> String {
+        names.map { $0.replacingOccurrences(of: "/", with: "\\/") }.joined(separator: "/")
+    }
+
+    public static func split(_ path: String) -> [String] {
+        var parts: [String] = [], current = ""
+        var escaped = false
+        for c in path {
+            if escaped { current.append(c); escaped = false; continue }
+            if c == "\\" { escaped = true; continue }
+            if c == "/" { parts.append(current); current = ""; continue }
+            current.append(c)
+        }
+        parts.append(current)
+        return parts.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
 }
 
 public enum NotesError: Error, Sendable, Equatable, CustomStringConvertible {
@@ -38,7 +65,7 @@ public enum NotesError: Error, Sendable, Equatable, CustomStringConvertible {
         switch self {
         case .noAccess(let m): "No access to Apple Notes data: \(m)"
         case .frameworkChanged(let m): m
-        case .notFound(let id): "No note with id \(id)"
+        case .notFound(let what): "Not found: \(what)"
         case .refused(let m): m
         case .conflict(let m): m
         case .failed(let m): m

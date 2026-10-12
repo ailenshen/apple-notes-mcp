@@ -56,7 +56,7 @@ Just talk to Claude:
 |------|-------------|
 | `overview` | Folders, or notes with their size and a one-line description; filter by date, sort by date or title |
 | `search` | Full-text search, with the matching text |
-| `read_note` | Read a note as Markdown, by id or title |
+| `read_note` | Read a note as Markdown — by id or title, several at once, or just one section |
 | `read_attachment` | Look at an image, scan, PDF, video, table or file in a note |
 | `create_note` | New note from Markdown |
 | `edit_note` | Change text, add under a heading, or rewrite a note — several changes in one go |

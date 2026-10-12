@@ -77,7 +77,7 @@ extension NotesRepository {
     /// Creates a folder from a path such as "Projects/Ideas": the parent must exist (or be the
     /// account, for a top-level folder). Returns the new folder's path.
     public func createFolder(path: String) async throws(NotesError) -> String {
-        let parts = path.split(separator: "/").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let parts = FolderPath.split(path)
         guard let name = parts.last else { throw .refused("give the new folder's path, such as \"Projects/Ideas\"") }
         try checkFolderName(name)
         if let prefix = writeGuardTitlePrefix, !name.hasPrefix(prefix) {
@@ -88,7 +88,7 @@ extension NotesRepository {
         let container: String
         let siblings: [NSManagedObject]
         if parts.count > 1 {
-            let parent = try folderObject(parts.dropLast().joined(separator: "/"), in: store)
+            let parent = try folderObject(FolderPath.join(Array(parts.dropLast())), in: store)
             if Self.isSharedFolder(parent) { throw .refused("folders are not created inside shared folders here") }
             container = "folder id \"\(parent.objectID.uriRepresentation().absoluteString)\""
             siblings = try children(of: parent, in: store)
@@ -106,7 +106,7 @@ extension NotesRepository {
         try await waitForNotes("creating the folder") { () throws(NotesError) in
             try AppleScript.run("tell application \"Notes\" to name of folder id \"\(created)\"") == name
         }
-        return parts.joined(separator: "/")
+        return FolderPath.join(parts)
     }
 
     public func renameFolder(_ reference: String, to name: String, allowShared: Bool) async throws(NotesError) -> (old: String, new: String) {
@@ -134,7 +134,7 @@ extension NotesRepository {
         try await waitForNotes("renaming the folder") { () throws(NotesError) in
             try AppleScript.run("tell application \"Notes\" to name of folder id \"\(uri)\"") == name
         }
-        let new = (old.split(separator: "/").dropLast().map(String.init) + [name]).joined(separator: "/")
+        let new = FolderPath.join(Array(FolderPath.split(old).dropLast()) + [name])
         return (old, new)
     }
 
@@ -215,15 +215,15 @@ extension NotesRepository {
             return FolderTarget(uri: folder.objectID.uriRepresentation().absoluteString, path: Self.path(of: folder, multipleAccounts: hasMultipleAccounts),
                                 accountID: Self.accountID(of: folder), isShared: Self.isSharedFolder(folder))
         } catch .notFound {
-            let parts = reference.split(separator: "/").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            let parts = FolderPath.split(reference)
             guard !parts.isEmpty else { throw .notFound("folder \"\(reference)\"") }
             let specifier = parts.reversed().map { "folder \(AppleScript.quoted($0))" }.joined(separator: " of ") + " of default account"
             guard let uri = try? AppleScript.run("tell application \"Notes\" to get id of \(specifier)") else {
                 throw .notFound("folder \"\(reference)\"; call overview to see folder paths")
             }
             // Only a folder Notes just created gets here; its parent (in the store) decides sharing.
-            let parentShared = parts.count > 1 ? ((try? folderObject(parts.dropLast().joined(separator: "/"), in: store)).map(Self.isSharedFolder) ?? false) : false
-            return FolderTarget(uri: uri, path: parts.joined(separator: "/"), accountID: nil, isShared: parentShared)
+            let parentShared = parts.count > 1 ? ((try? folderObject(FolderPath.join(Array(parts.dropLast())), in: store)).map(Self.isSharedFolder) ?? false) : false
+            return FolderTarget(uri: uri, path: FolderPath.join(parts), accountID: nil, isShared: parentShared)
         }
     }
 
