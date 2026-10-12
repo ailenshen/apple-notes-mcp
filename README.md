@@ -59,9 +59,7 @@ Just talk to Claude:
 | `read_note` | Read a note as Markdown, by id or title |
 | `read_attachment` | Look at an image, scan, PDF, video, table or file in a note |
 | `create_note` | New note from Markdown |
-| `append_to_note` | Add to the end, the start, or under a heading |
-| `edit_note` | Change one piece of text |
-| `update_note` | Rewrite a whole note |
+| `edit_note` | Change text, add under a heading, or rewrite a note — several changes in one go |
 | `describe_note` | Save one-line descriptions, many at once |
 | `move_note` | Move a note to another folder, or restore it from Recently Deleted |
 | `manage_folder` | Create, rename or delete a folder |
