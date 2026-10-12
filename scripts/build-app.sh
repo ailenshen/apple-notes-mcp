@@ -17,7 +17,13 @@ VERSION=${VERSION:-2.0.0-dev}
 BUILD_NUMBER=$(printf '%s' "$VERSION" | sed 's/-.*//')
 IDENTITY=${SIGNING_IDENTITY:-Apple Notes MCP Signing}
 OUT=${OUT:-dist}
-APP="$OUT/AppleNotesMCP.app"
+# The bundle is assembled and signed outside the repo, then copied to $OUT. When the repo is in
+# iCloud Drive, File Provider keeps putting com.apple.FinderInfo on any .app folder inside it,
+# and codesign refuses to sign or strictly verify a bundle with that attribute.
+# 当仓库不再放在 iCloud Drive（或构建改由 Xcode 管理）时，可以直接在 $OUT 中组装与签名。
+STAGE=$(mktemp -d)
+trap 'rm -rf "$STAGE"' EXIT
+APP="$STAGE/AppleNotesMCP.app"
 
 binary() {  # builds one architecture in its own scratch path and prints the binary path
   swift build -c release --triple "$1-apple-macosx26.0" --scratch-path ".build/$1" --product AppleNotesMCP >&2
@@ -26,7 +32,6 @@ binary() {  # builds one architecture in its own scratch path and prints the bin
 ARM=$(binary arm64)
 X86=$(binary x86_64)
 
-rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 lipo -create "$ARM" "$X86" -output "$APP/Contents/MacOS/AppleNotesMCP"
 awk -v v="$VERSION" -v b="$BUILD_NUMBER" '
@@ -34,6 +39,7 @@ awk -v v="$VERSION" -v b="$BUILD_NUMBER" '
       { gsub(/__VERSION__/, v); print }' Resources/Info.plist > "$APP/Contents/Info.plist"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
+xattr -cr "$APP"
 if security find-identity -p codesigning 2>/dev/null | grep -q "\"$IDENTITY\""; then
   codesign --force --sign "$IDENTITY" --identifier com.ailenshen.apple-notes-mcp --timestamp=none "$APP"
 else
@@ -44,4 +50,7 @@ fi
 codesign --verify --strict "$APP"
 codesign -d -r- "$APP" 2>&1 | sed -n 's/^designated => /designated requirement: /p'
 lipo -archs "$APP/Contents/MacOS/AppleNotesMCP" | sed 's/^/architectures: /'
-echo "built $APP ($VERSION)"
+mkdir -p "$OUT"
+rm -rf "$OUT/AppleNotesMCP.app"
+ditto "$APP" "$OUT/AppleNotesMCP.app"
+echo "built $OUT/AppleNotesMCP.app ($VERSION)"

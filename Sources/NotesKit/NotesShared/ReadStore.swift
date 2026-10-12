@@ -20,6 +20,11 @@ final class ReadStore {
         options[NSMigratePersistentStoresAutomaticallyOption] = false
         options[NSInferMappingModelAutomaticallyOption] = false
         options[NSReadOnlyPersistentStoreOption] = true
+        // Checked first: without access Core Data dumps a page of diagnostics to stderr, which
+        // ends up in the MCP client's log.
+        guard Permissions.fullDiskAccess() == .granted else {
+            throw .noAccess("Apple Notes MCP needs Full Disk Access to read the Notes database")
+        }
         let coordinator = NSPersistentStoreCoordinator(managedObjectModel: model)
         let store: NSPersistentStore
         do {
