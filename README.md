@@ -83,6 +83,7 @@ Both are granted to **Apple Notes MCP**, not to Terminal, Claude or Node — so 
 | `edit_note` | Replaces one piece of text, like editing a file |
 | `update_note` | Rewrites the whole note; unchanged lines keep their formatting |
 | `delete_note` | Moves a note to Recently Deleted |
+| `read_attachment` | Opens an image, scan, drawing, PDF, audio, video, table, link or file from a note, in MCP's own content types, with the text Notes recognized |
 | `move_note` | Moves a note to another folder, keeping its id; also restores a note from Recently Deleted |
 | `manage_folder` | Creates, renames or deletes a folder (only empty folders are deleted; folders cannot be moved yet) |
 

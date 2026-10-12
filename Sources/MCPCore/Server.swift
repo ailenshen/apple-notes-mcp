@@ -12,9 +12,30 @@ public let protocolVersion = "2026-07-28"
 public struct ToolResult: Sendable {
     public var text: String
     public var isError: Bool
-    public init(_ text: String, isError: Bool = false) {
+    /// Content after the text: images, audio or files the client passes on to the model.
+    public var extra: [ContentBlock]
+    public init(_ text: String, isError: Bool = false, extra: [ContentBlock] = []) {
         self.text = text
         self.isError = isError
+        self.extra = extra
+    }
+}
+
+/// The non-text content blocks of MCP 2026-07-28 (`ImageContent`, `AudioContent`,
+/// `EmbeddedResource` with a blob).
+public enum ContentBlock: Sendable {
+    case image(Data, mimeType: String)
+    case audio(Data, mimeType: String)
+    /// A file embedded in the result, e.g. a PDF.
+    case resource(uri: String, mimeType: String, Data)
+
+    var json: JSONValue {
+        switch self {
+        case .image(let data, let mime): ["type": "image", "data": .string(data.base64EncodedString()), "mimeType": .string(mime)]
+        case .audio(let data, let mime): ["type": "audio", "data": .string(data.base64EncodedString()), "mimeType": .string(mime)]
+        case .resource(let uri, let mime, let data):
+            ["type": "resource", "resource": ["uri": .string(uri), "mimeType": .string(mime), "blob": .string(data.base64EncodedString())]]
+        }
     }
 }
 
@@ -171,7 +192,7 @@ public final class Server: Sendable {
                 outcome = ToolResult("\(error)", isError: true)
             }
             return complete([
-                "content": [["type": "text", "text": .string(outcome.text)]],
+                "content": .array([["type": "text", "text": .string(outcome.text)]] + outcome.extra.map(\.json)),
                 "isError": .bool(outcome.isError),
             ])
         }
