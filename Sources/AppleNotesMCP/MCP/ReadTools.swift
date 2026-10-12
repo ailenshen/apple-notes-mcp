@@ -100,7 +100,9 @@ struct OverviewTool: Tool {
         return try await notesResult {
             let descriptions = try await notes.index.all()
             if folder != nil || undescribed || !window.isEmpty || !createdWindow.isEmpty || order != nil {
-                return try await noteList(folder: folder, window: window, created: createdWindow, order: order ?? (createdWindow.isEmpty ? .modified : .created), undescribed: undescribed,
+                // Listing a folder in its natural order groups notes by subfolder.
+                let group = folder != nil && order == nil && window.isEmpty && createdWindow.isEmpty
+                return try await noteList(folder: folder, window: window, created: createdWindow, order: order ?? (createdWindow.isEmpty ? .modified : .created), group: group, undescribed: undescribed,
                                           limit: limit, descriptions: descriptions)
             }
             let folders = try await notes.repository.folders()
@@ -146,15 +148,17 @@ struct OverviewTool: Tool {
     /// descriptions in bulk. The calling model writes them; the server never generates any.
     /// 当主流客户端声明 sampling 能力时，可考虑由服务器在后台请求客户端模型生成描述。
     private func noteList(
-        folder: String?, window: DateWindow, created: DateWindow, order: NoteOrder, undescribed: Bool, limit: Int,
+        folder: String?, window: DateWindow, created: DateWindow, order: NoteOrder, group: Bool, undescribed: Bool, limit: Int,
         descriptions: [String: NoteDescription]
     ) async throws -> String {
         var scope: Set<String>?
         var scopeName = "all folders"
         var subfolderLine: String?
+        var rootNames: [String] = []
+        let all = try await notes.repository.folders()
         if let folder {
             let resolved = try await notes.repository.resolveFolder(folder)
-            let all = try await notes.repository.folders()
+            rootNames = resolved.names
             let inside = all.filter { $0.names.count > resolved.names.count && Array($0.names.prefix(resolved.names.count)) == resolved.names }
             scope = Set([resolved.id] + inside.map(\.id))
             scopeName = resolved.path
@@ -169,22 +173,39 @@ struct OverviewTool: Tool {
         case .created: list.sort { $0.created > $1.created }
         case .title: list.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
         }
+        if group {
+            // Folders in tree order (the folder itself first), each folder's notes newest first.
+            let rank = Dictionary(uniqueKeysWithValues: all.enumerated().map { ($0.element.id, $0.offset) })
+            list = list.enumerated().sorted { (rank[$0.element.folderID] ?? 0, $0.offset) < (rank[$1.element.folderID] ?? 0, $1.offset) }.map(\.element)
+        }
         let shown = Array(list.prefix(limit))
         let ids = Set(shown.map(\.id))
         let bodies = try await notes.search.bodies(ids: ids)
         let attachments = try await notes.search.attachmentKinds(noteIDs: ids)
-        let showFolder = Set(shown.map(\.folderID)).count > 1
+        // Across all folders the folder is always shown; within a folder, only once there are subfolders.
+        let showFolder = folder == nil || Set(shown.map(\.folderID)).count > 1
         let what = undescribed ? "notes without a current description" : "notes"
         let range = [window.label("modified"), created.label("created")].filter { !$0.isEmpty }.joined(separator: ", ")
         var lines = ["\(scopeName)\(range.isEmpty ? "" : " " + range) — \(list.count) \(what)\(list.count > shown.count ? ", showing \(shown.count)" : "")"]
         if let subfolderLine { lines.append(subfolderLine) }
         if list.isEmpty { return lines.joined(separator: "\n") }
         let dateName = order == .created ? "created" : "modified"
-        lines.append("id | title | " + (showFolder ? "folder | " : "") + "\(dateName) | size" + (undescribed ? "" : " | description"))
+        if showFolder {
+            lines.append(rootNames.isEmpty ? "[folder] heads the notes below it." : "[folder] heads the notes below it, relative to \(scopeName); [.] is \(scopeName) itself.")
+        }
+        lines.append("id | title | \(dateName) | size" + (undescribed ? "" : " | description"))
+        let folderNames = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0.names) })
+        var lastFolder: String?
         for note in shown {
+            if showFolder, note.folderID != lastFolder {
+                let names = folderNames[note.folderID] ?? []
+                let relative = names.count >= rootNames.count && Array(names.prefix(rootNames.count)) == rootNames ? Array(names.dropFirst(rootNames.count)) : names
+                lines.append("[\(relative.isEmpty ? "." : FolderPath.join(relative))]")
+                lastFolder = note.folderID
+            }
             let text = bodies[note.id] ?? ""
             let date = day(order == .created ? note.created : note.modified)
-            var line = "\(ShortID.of(note.id)) | \(note.isPinned ? "📌 " : "")\(listTitle(note.title)) | " + (showFolder ? "\(note.folderPath) | " : "")
+            var line = "\(ShortID.of(note.id)) | \(note.isPinned ? "📌 " : "")\(listTitle(note.title)) | "
                 + "\(date) | \(note.isLocked ? "locked" : sizeLabel(characters: text.count, attachments: attachments[note.id] ?? [:]))"
             if undescribed {
                 lines.append(line)

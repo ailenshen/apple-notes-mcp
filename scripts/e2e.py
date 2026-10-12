@@ -69,6 +69,7 @@ import datetime
 today = datetime.date.today().isoformat()
 err, text = call("overview", modified_after=today, sort="modified", limit=500)
 check("overview lists today's notes across folders, with sizes", not err and short in text and " chars" in text, text[:300])
+check("a cross-folder list names folders on their own lines, not per note", not err and "\n[Notes]\n" in text and "| Notes |" not in text, text[:300])
 err, text = call("overview", created_after=today)
 check("overview created-date filter", not err and short in text and "created since" in text, text[:200])
 err, text = call("overview", modified_before="2000-01-01")
