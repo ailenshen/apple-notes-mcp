@@ -114,7 +114,9 @@ NotesShared is a private Apple framework. The server checks at startup that ever
 
 ## Remote access
 
-Version 2 talks only over stdio. To use it from another device, put it behind a bridge that turns HTTP into stdio and supports MCP 2026-07-28. The built-in HTTP mode of version 1 was removed.
+Version 2 talks only over stdio. To use it from another device, put it behind a bridge that forwards each HTTP request to stdio as-is. Version 2 keeps no session, so the bridge does not need one. This has been checked with a claude.ai custom connector through such a bridge. The built-in HTTP mode of version 1 was removed.
+
+**Upgrading from 1.x:** a client that connected while 1.x was running keeps using the older protocol, and its calls fail until it reconnects. Restart the client, or reconnect the connector, once after upgrading.
 
 ## Development
 

@@ -178,10 +178,14 @@ public final class Server: Sendable {
     }
 
     /// Every request must carry its protocol version and client capabilities (SEP-2575).
+    /// A request without a version usually comes from a client still holding a session it opened
+    /// with an older server at the same address (seen with claude.ai after upgrading from 1.x), so
+    /// the message says how to recover. 当主流客户端都能在收到该错误后自动重新 discover 时，去掉这段提示。
     private func validateMeta(_ meta: JSONValue?) throws {
-        guard case .object(let meta)? = meta else { throw MCPError.invalidParams("Missing _meta") }
+        let reconnect = "This server only speaks MCP \(protocolVersion). If the client connected to an older version of this server, reconnect it or restart the client."
+        guard case .object(let meta)? = meta else { throw MCPError.invalidParams("Missing _meta. \(reconnect)") }
         guard let version = meta["io.modelcontextprotocol/protocolVersion"]?.stringValue else {
-            throw MCPError.invalidParams("Missing _meta.io.modelcontextprotocol/protocolVersion")
+            throw MCPError.invalidParams("Missing _meta.io.modelcontextprotocol/protocolVersion. \(reconnect)")
         }
         guard meta["io.modelcontextprotocol/clientCapabilities"]?.objectValue != nil else {
             throw MCPError.invalidParams("Missing _meta.io.modelcontextprotocol/clientCapabilities")
