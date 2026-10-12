@@ -1,4 +1,6 @@
+import Foundation
 import MCPCore
+import NotesKit
 
 /// Typed access to tool arguments. Shape problems (missing, wrong type, unknown value) are
 /// JSON-RPC invalid-params errors; everything about the notes themselves is a tool result.
@@ -38,6 +40,37 @@ struct Arguments {
         }
         guard range.contains(value) else { throw MCPError.invalidParams("\(key) must be between \(range.lowerBound) and \(range.upperBound)") }
         return value
+    }
+
+    /// A date as YYYY-MM-DD (start of that day, local time) or an ISO 8601 date-time.
+    func optionalDate(_ key: String) throws -> Date? {
+        guard let text = try optionalString(key) else { return nil }
+        let day = DateFormatter()
+        day.dateFormat = "yyyy-MM-dd"
+        day.timeZone = .current
+        day.locale = Locale(identifier: "en_US_POSIX")
+        if let date = day.date(from: text) { return date }
+        let full = ISO8601DateFormatter()
+        if let date = full.date(from: text) { return date }
+        full.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = full.date(from: text) { return date }
+        throw MCPError.invalidParams("\(key) must be a date like 2026-10-01 or 2026-10-01T09:00:00+08:00")
+    }
+
+    func dateWindow() throws -> DateWindow {
+        let window = DateWindow(from: try optionalDate("modified_after"), until: try optionalDate("modified_before"))
+        if let from = window.from, let until = window.until, from >= until {
+            throw MCPError.invalidParams("modified_after must be earlier than modified_before")
+        }
+        return window
+    }
+
+    func order() throws -> NoteOrder? {
+        guard let value = try optionalString("sort") else { return nil }
+        guard let order = NoteOrder(rawValue: value) else {
+            throw MCPError.invalidParams("sort must be one of \(NoteOrder.allCases.map(\.rawValue).joined(separator: ", "))")
+        }
+        return order
     }
 
     func choice(_ key: String, _ allowed: [String], default fallback: String) throws -> String {

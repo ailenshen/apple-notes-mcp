@@ -51,6 +51,16 @@ err, text = call("read_note", id=note_id)
 version = re.search(r"version: (\w+)", text).group(1) if not err else ""
 check("read_note returns Markdown and asks for a description", not err and "**bold**" in text and "describe_note" in text, text)
 
+import datetime
+today = datetime.date.today().isoformat()
+err, text = call("overview", modified_after=today, sort="modified", limit=500)
+check("overview lists today's notes across folders, with sizes", not err and note_id in text and " chars" in text, text[:300])
+err, text = call("overview", modified_before="2000-01-01")
+check("overview date filter excludes newer notes", not err and note_id not in text, text[:200])
+err, text = call("search", query=f"zebra{tag}", modified_after=today, sort="title")
+check("search with a date filter and sort", not err and note_id in text and " chars" in text, text[:300])
+err, text = call("search", query=f"zebra{tag}", modified_before=today)
+check("search date filter excludes today's note", not err and "No notes match" in text, text[:200])
 err, text = call("overview", undescribed=True, limit=200)
 check("overview lists undescribed notes with their text", not err and note_id in text and "describe_note" in text, text[:300])
 err, text = call("describe_note", descriptions=[{"id": note_id, "description": "End-to-end test note"},

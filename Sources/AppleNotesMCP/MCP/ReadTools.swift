@@ -17,8 +17,12 @@ struct NotesContext: Sendable {
     }
 }
 
+/// The local calendar day, as YYYY-MM-DD. (The ISO 8601 format style would give the UTC day.)
 func day(_ date: Date) -> String {
-    date.formatted(.iso8601.year().month().day().dateSeparator(.dash))
+    let f = DateFormatter()
+    f.dateFormat = "yyyy-MM-dd"
+    f.locale = Locale(identifier: "en_US_POSIX")
+    return f.string(from: date)
 }
 
 /// Titles in lists are cut to keep each line short; the id identifies the note anyway.
@@ -72,17 +76,21 @@ struct OverviewTool: Tool {
     let name = "overview"
     let title: String? = "Overview of notes"
     let description = """
-        Without folder: every folder with its id, note count and how many notes have a description. \
-        With folder (path or id): one line per note — id | title | last modified | description \
-        (~ marks a description extracted automatically, ! one that is out of date). \
-        With undescribed: true (with or without folder): only notes lacking a current description, \
-        each with the start of its text, so you can write descriptions for many notes at once \
-        with describe_note.
+        With no arguments: every folder with its id, note count and how many notes have a description. \
+        With folder (path or id; includes subfolders), a date filter or sort: one line per note — \
+        id | title | [folder |] date | size | description (~ marks a description extracted \
+        automatically, ! one that is out of date). Size is characters of text plus attachments, so you \
+        can judge a note before reading it. Without folder, a date filter or sort lists notes from all \
+        folders. undescribed: true lists only notes lacking a current description, each with the start \
+        of its text, so you can write many descriptions at once with describe_note.
         """
     let inputSchema = schema([
         "folder": stringProperty("Folder path such as \"Projects/Ideas\", or a folder id"),
-        "undescribed": ["type": "boolean", "description": "List only notes without a current description, with the start of their text"],
-        "limit": ["type": "integer", "minimum": 1, "maximum": 200, "description": "With undescribed: at most this many notes (default 50)"],
+        "modified_after": stringProperty("Only notes modified on or after this date (YYYY-MM-DD, or ISO 8601 date-time)"),
+        "modified_before": stringProperty("Only notes modified before this date (YYYY-MM-DD, or ISO 8601 date-time)"),
+        "sort": sortProperty("modified (default, newest first), created (newest first) or title"),
+        "undescribed": ["type": "boolean", "description": "Only notes without a current description, with the start of their text"],
+        "limit": ["type": "integer", "minimum": 1, "maximum": 500, "description": "At most this many notes (default 100; 50 with undescribed)"],
     ])
     let annotations = ToolAnnotations.readOnly
 
@@ -90,30 +98,14 @@ struct OverviewTool: Tool {
         let args = Arguments(arguments)
         let folder = try args.optionalString("folder")
         let undescribed = try args.bool("undescribed", default: false)
-        let limit = try args.int("limit", default: 50, range: 1...200)
+        let window = try args.dateWindow()
+        let order = try args.order()
+        let limit = try args.int("limit", default: undescribed ? 50 : 100, range: 1...500)
         return try await notesResult {
             let descriptions = try await notes.index.all()
-            if undescribed { return try await undescribedNotes(folder: folder, limit: limit, descriptions: descriptions) }
-            if let folder {
-                let resolved = try await notes.repository.resolveFolder(folder)
-                let list = try await notes.repository.notes(inFolder: resolved.id)
-                let needExtract = Set(list.filter { !notes.isFresh(descriptions[$0.id], modified: $0.modified) }.map(\.id))
-                let bodies = try await notes.search.bodies(ids: needExtract)
-                var lines = ["\(resolved.path) — \(list.count) notes", "id | title | modified | description"]
-                for note in list {
-                    let summary: String
-                    if note.isLocked {
-                        summary = "(locked)"
-                    } else if let d = descriptions[note.id], notes.isFresh(d, modified: note.modified) {
-                        summary = d.text
-                    } else if let d = descriptions[note.id] {
-                        summary = "! " + d.text
-                    } else {
-                        summary = "~ " + DescriptionIndex.extract(fromPlainText: bodies[note.id] ?? "", title: note.title)
-                    }
-                    lines.append("\(note.id) | \(note.isPinned ? "📌 " : "")\(listTitle(note.title)) | \(day(note.modified)) | \(summary)")
-                }
-                return lines.joined(separator: "\n")
+            if folder != nil || undescribed || !window.isEmpty || order != nil {
+                return try await noteList(folder: folder, window: window, order: order ?? .modified, undescribed: undescribed,
+                                          limit: limit, descriptions: descriptions)
             }
             let folders = try await notes.repository.folders()
             var lines = ["path | id | notes | described"]
@@ -127,33 +119,66 @@ struct OverviewTool: Tool {
         }
     }
 
-    /// The material for writing descriptions in bulk: notes without a current description, each
-    /// with the start of its text. The calling model writes them; the server never generates any.
+    /// One line per note in scope, filtered and ordered. With `undescribed`, only notes lacking a
+    /// current description, each followed by the start of its text: the material for writing
+    /// descriptions in bulk. The calling model writes them; the server never generates any.
     /// 当主流客户端声明 sampling 能力时，可考虑由服务器在后台请求客户端模型生成描述。
-    private func undescribedNotes(folder: String?, limit: Int, descriptions: [String: NoteDescription]) async throws -> String {
+    private func noteList(
+        folder: String?, window: DateWindow, order: NoteOrder, undescribed: Bool, limit: Int,
+        descriptions: [String: NoteDescription]
+    ) async throws -> String {
         let scope: [FolderSnapshot]
+        var scopeName = "all folders"
         if let folder {
             let resolved = try await notes.repository.resolveFolder(folder)
             scope = try await notes.repository.folders().filter { $0.id == resolved.id || $0.path.hasPrefix(resolved.path + "/") }
+            scopeName = resolved.path
         } else {
             scope = try await notes.repository.folders()
         }
-        var pending: [NoteSnapshot] = []
-        for f in scope {
-            pending += try await notes.repository.notes(inFolder: f.id)
-                .filter { !$0.isLocked && !notes.isFresh(descriptions[$0.id], modified: $0.modified) }
+        var list: [NoteSnapshot] = []
+        for f in scope { list += try await notes.repository.notes(inFolder: f.id) }
+        list = list.filter { window.contains($0.modified) }
+        if undescribed { list = list.filter { !$0.isLocked && !notes.isFresh(descriptions[$0.id], modified: $0.modified) } }
+        switch order {
+        case .modified: list.sort { $0.modified > $1.modified }
+        case .created: list.sort { $0.created > $1.created }
+        case .title: list.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
         }
-        let where_ = folder.map { " in \($0)" } ?? ""
-        if pending.isEmpty { return "Every note\(where_) has a current description." }
-        pending.sort { $0.modified > $1.modified }
-        let shown = Array(pending.prefix(limit))
-        let bodies = try await notes.search.bodies(ids: Set(shown.map(\.id)))
-        var lines = ["\(pending.count) notes\(where_) have no current description\(pending.count > shown.count ? " (showing the \(shown.count) most recently modified)" : ""):"]
+        let shown = Array(list.prefix(limit))
+        let ids = Set(shown.map(\.id))
+        let bodies = try await notes.search.bodies(ids: ids)
+        let attachments = try await notes.search.attachmentKinds(noteIDs: ids)
+        let showFolder = Set(shown.map(\.folderID)).count > 1
+        let what = undescribed ? "notes without a current description" : "notes"
+        var lines = ["\(scopeName)\(window.isEmpty ? "" : " " + window.label) — \(list.count) \(what)\(list.count > shown.count ? ", showing \(shown.count)" : "")"]
+        if list.isEmpty { return lines[0] }
+        let dateName = order == .created ? "created" : "modified"
+        lines.append("id | title | " + (showFolder ? "folder | " : "") + "\(dateName) | size" + (undescribed ? "" : " | description"))
         for note in shown {
-            lines.append("\(note.id) | \(listTitle(note.title)) | \(note.folderPath) | \(day(note.modified))")
-            lines.append("  " + Self.opening(of: bodies[note.id] ?? "", title: note.title))
+            let text = bodies[note.id] ?? ""
+            let date = day(order == .created ? note.created : note.modified)
+            var line = "\(note.id) | \(note.isPinned ? "📌 " : "")\(listTitle(note.title)) | " + (showFolder ? "\(note.folderPath) | " : "")
+                + "\(date) | \(note.isLocked ? "locked" : sizeLabel(characters: text.count, attachments: attachments[note.id] ?? [:]))"
+            if undescribed {
+                lines.append(line)
+                lines.append("  " + Self.opening(of: text, title: note.title))
+                continue
+            }
+            let summary: String
+            if note.isLocked {
+                summary = "(locked)"
+            } else if let d = descriptions[note.id], notes.isFresh(d, modified: note.modified) {
+                summary = d.text
+            } else if let d = descriptions[note.id] {
+                summary = "! " + d.text
+            } else {
+                summary = "~ " + DescriptionIndex.extract(fromPlainText: text, title: note.title)
+            }
+            line += " | \(summary)"
+            lines.append(line)
         }
-        lines.append("Write one line per note with describe_note, several notes per call.")
+        if undescribed { lines.append("Write one line per note with describe_note, several notes per call.") }
         return lines.joined(separator: "\n")
     }
 
@@ -168,18 +193,45 @@ struct OverviewTool: Tool {
     }
 }
 
+/// "2.3k chars, 3 images, 1 table": enough to judge a note before reading it.
+func sizeLabel(characters: Int, attachments: [String: Int]) -> String {
+    let chars = characters < 1000 ? "\(characters) chars" : String(format: "%.1fk chars", Double(characters) / 1000)
+    let extra = AttachmentKind.summary(attachments)
+    return extra.isEmpty ? chars : chars + ", " + extra
+}
+
+func sortProperty(_ description: String) -> JSONValue {
+    ["type": "string", "enum": .array(NoteOrder.allCases.map { .string($0.rawValue) }), "description": .string(description)]
+}
+
+extension DateWindow {
+    var label: String {
+        switch (from, until) {
+        case (let f?, let u?):
+            day(f) == day(u.addingTimeInterval(-1)) ? "modified on \(day(f))" : "modified \(day(f)) to \(day(u.addingTimeInterval(-1)))"
+        case (let f?, nil): "modified since \(day(f))"
+        case (nil, let u?): "modified before \(day(u))"
+        case (nil, nil): ""
+        }
+    }
+}
+
 struct SearchTool: Tool {
     let notes: NotesContext
     let name = "search"
     let title: String? = "Search notes"
     let description = """
         Full-text search over titles and bodies. Words are separated by spaces; match "all" (default) \
-        needs every word, "any" needs one. Returns id | title | folder | modified, with the matching text.
+        needs every word, "any" needs one. Returns id | title | folder | date | size, with the matching \
+        text. Best matches come first unless sort is given; dates filter by modification date.
         """
     let inputSchema = schema([
         "query": stringProperty("Words to look for"),
         "match": ["type": "string", "enum": ["all", "any"], "description": "all (default) or any"],
         "folder": stringProperty("Only this folder (and its subfolders): path or id"),
+        "modified_after": stringProperty("Only notes modified on or after this date (YYYY-MM-DD, or ISO 8601 date-time)"),
+        "modified_before": stringProperty("Only notes modified before this date (YYYY-MM-DD, or ISO 8601 date-time)"),
+        "sort": sortProperty("Instead of best match first: modified or created (newest first), or title"),
         "limit": ["type": "integer", "minimum": 1, "maximum": 100, "description": "Default 20"],
     ], required: ["query"])
     let annotations = ToolAnnotations.readOnly
@@ -190,18 +242,24 @@ struct SearchTool: Tool {
         let matchAll = try args.choice("match", ["all", "any"], default: "all") == "all"
         let folder = try args.optionalString("folder")
         let limit = try args.int("limit", default: 20, range: 1...100)
+        let window = try args.dateWindow()
+        let order = try args.order()
         return try await notesResult {
             let folderPath = try await folder.asyncMap { try await notes.repository.resolveFolder($0).path }
             let paths = try await notes.repository.folderPathsByPrimaryKey()
             let deleted = await notes.repository.deletedHere
-            var (total, hits) = try await notes.search.search(query, matchAll: matchAll, folderPath: folderPath, limit: limit + deleted.count, folderPaths: paths)
+            var (total, hits) = try await notes.search.search(query, matchAll: matchAll, folderPath: folderPath, limit: limit + deleted.count, folderPaths: paths,
+                                                            modified: window, order: order)
             let before = hits.count
             hits = Array(hits.filter { !deleted.contains($0.id) }.prefix(limit))
             total -= before - hits.count
-            if hits.isEmpty { return "No notes match \"\(query)\"." }
-            var lines = ["\(total) notes match \"\(query)\"\(total > hits.count ? " (showing \(hits.count))" : ""):"]
+            let scope = window.isEmpty ? "" : " (\(window.label))"
+            if hits.isEmpty { return "No notes match \"\(query)\"\(scope)." }
+            let attachments = try await notes.search.attachmentKinds(noteIDs: Set(hits.map(\.id)))
+            var lines = ["\(total) notes match \"\(query)\"\(scope)\(total > hits.count ? ", showing \(hits.count)" : ""):"]
             for hit in hits {
-                lines.append("\(hit.id) | \(listTitle(hit.title)) | \(hit.folderPath) | \(day(hit.modified))")
+                let date = day(order == .created ? hit.created : hit.modified)
+                lines.append("\(hit.id) | \(listTitle(hit.title)) | \(hit.folderPath) | \(date) | \(sizeLabel(characters: hit.length, attachments: attachments[hit.id] ?? [:]))")
                 lines.append("  \(hit.snippet)")
             }
             return lines.joined(separator: "\n")

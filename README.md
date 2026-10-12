@@ -74,8 +74,8 @@ Both are granted to **Apple Notes MCP**, not to Terminal, Claude or Node — so 
 
 | Tool | What it does |
 |------|-------------|
-| `overview` | All folders with note counts; or one line per note in a folder, with a short description; or the notes still missing a description, with the start of their text |
-| `search` | Full-text search over titles and bodies, with the matching text |
+| `overview` | All folders with note counts; or one line per note (in a folder, or across folders by date) with its size and a short description; or the notes still missing a description, with the start of their text. Filters by modification date and sorts by date or title |
+| `search` | Full-text search over titles and bodies, with the matching text and each note's size; filters by modification date and sorts by relevance, date or title |
 | `read_note` | The note as Markdown, plus a version to pass back when writing; by id, or by exact title |
 | `describe_note` | Saves one-line descriptions, for one note or many at once, shown by `overview` |
 | `create_note` | A new note from Markdown |

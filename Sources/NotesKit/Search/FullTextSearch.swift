@@ -12,7 +12,29 @@ public struct SearchHit: Sendable {
     public var title: String
     public var folderPath: String
     public var modified: Date
+    public var created: Date
     public var snippet: String
+    /// Characters of plain text, for showing a note's size before reading it.
+    public var length: Int
+}
+
+/// How lists of notes are ordered: by date, newest first, or by title.
+public enum NoteOrder: String, Sendable, CaseIterable {
+    case modified, created, title
+}
+
+/// Which notes a list keeps, by modification date (from inclusive, until exclusive).
+public struct DateWindow: Sendable {
+    public var from: Date?
+    public var until: Date?
+    public init(from: Date? = nil, until: Date? = nil) {
+        self.from = from
+        self.until = until
+    }
+    public var isEmpty: Bool { from == nil && until == nil }
+    public func contains(_ date: Date) -> Bool {
+        (from.map { date >= $0 } ?? true) && (until.map { date < $0 } ?? true)
+    }
 }
 
 public actor FullTextSearch {
@@ -24,27 +46,30 @@ public actor FullTextSearch {
     /// - Parameters:
     ///   - folderPaths: user folders by Core Data primary key; notes elsewhere (trash) are skipped.
     ///   - folderPath: limit to this folder and its subfolders.
+    ///   - order: nil ranks by relevance (title matches first), else by date or title.
     public func search(
-        _ query: String, matchAll: Bool, folderPath: String?, limit: Int, folderPaths: [Int64: String]
+        _ query: String, matchAll: Bool, folderPath: String?, limit: Int, folderPaths: [Int64: String],
+        modified window: DateWindow = DateWindow(), order: NoteOrder? = nil
     ) throws(NotesError) -> (total: Int, hits: [SearchHit]) {
         let terms = query.split(whereSeparator: \.isWhitespace).map(String.init)
         guard !terms.isEmpty else { throw .refused("the search query is empty") }
         let db = try open()
-        struct Row { var id: String; var title: String; var folder: Int64; var modified: Double; var key: String; var dataPK: Int64 }
+        struct Row { var id: String; var title: String; var folder: Int64; var modified: Double; var created: Double; var key: String; var dataPK: Int64 }
         var rows: [Row] = []
         try db.query("""
-            SELECT n.ZIDENTIFIER, n.ZTITLE1, n.ZFOLDER, n.ZMODIFICATIONDATE1, length(d.ZDATA), d.Z_PK
+            SELECT n.ZIDENTIFIER, n.ZTITLE1, n.ZFOLDER, n.ZMODIFICATIONDATE1, length(d.ZDATA), d.Z_PK, n.ZCREATIONDATE3
             FROM ZICCLOUDSYNCINGOBJECT n LEFT JOIN ZICNOTEDATA d ON d.Z_PK = n.ZNOTEDATA
             WHERE n.Z_ENT = (SELECT Z_ENT FROM Z_PRIMARYKEY WHERE Z_NAME = 'ICNote')
               AND IFNULL(n.ZMARKEDFORDELETION, 0) = 0 AND IFNULL(n.ZISPASSWORDPROTECTED, 0) = 0
             """) { r throws(NotesError) in
             guard let id = r.text(0) else { return }
-            rows.append(Row(id: id, title: r.text(1) ?? "", folder: r.int(2), modified: r.double(3),
+            rows.append(Row(id: id, title: r.text(1) ?? "", folder: r.int(2), modified: r.double(3), created: r.double(6),
                             key: "\(r.double(3))|\(r.int(4))", dataPK: r.int(5)))
         }
         var hits: [(hit: SearchHit, score: Int)] = []
         for row in rows {
             guard let path = folderPaths[row.folder] else { continue }
+            if !window.contains(Date(timeIntervalSinceReferenceDate: row.modified)) { continue }
             if let folderPath, path != folderPath, !path.hasPrefix(folderPath + "/") { continue }
             let text = try body(row.id, key: row.key, dataPK: row.dataPK, db: db)
             let haystack = row.title + "\n" + text
@@ -53,10 +78,16 @@ public actor FullTextSearch {
             let inTitle = terms.filter { row.title.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) != nil }.count
             hits.append((
                 SearchHit(id: row.id, title: row.title, folderPath: path, modified: Date(timeIntervalSinceReferenceDate: row.modified),
-                          snippet: Self.snippet(text, terms: found)),
+                          created: Date(timeIntervalSinceReferenceDate: row.created),
+                          snippet: Self.snippet(text, terms: found), length: text.count),
                 found.count * 10 + inTitle * 100))
         }
-        hits.sort { ($0.score, $0.hit.modified) > ($1.score, $1.hit.modified) }
+        switch order {
+        case nil: hits.sort { ($0.score, $0.hit.modified) > ($1.score, $1.hit.modified) }
+        case .modified: hits.sort { $0.hit.modified > $1.hit.modified }
+        case .created: hits.sort { $0.hit.created > $1.hit.created }
+        case .title: hits.sort { $0.hit.title.localizedStandardCompare($1.hit.title) == .orderedAscending }
+        }
         return (hits.count, Array(hits.prefix(limit).map(\.hit)))
     }
 
@@ -76,9 +107,37 @@ public actor FullTextSearch {
         return out
     }
 
+    /// Attachments of each note, counted by kind ("image", "table", "PDF", …). Inline
+    /// attachments (hashtags, note links) are not counted: they are part of the text.
+    public func attachmentKinds(noteIDs: Set<String>) throws(NotesError) -> [String: [String: Int]] {
+        let db = try open()
+        var out: [String: [String: Int]] = [:]
+        try db.query("""
+            SELECT n.ZIDENTIFIER, a.ZTYPEUTI FROM ZICCLOUDSYNCINGOBJECT a
+            JOIN ZICCLOUDSYNCINGOBJECT n ON n.Z_PK = a.ZNOTE
+            WHERE a.Z_ENT = (SELECT Z_ENT FROM Z_PRIMARYKEY WHERE Z_NAME = 'ICAttachment')
+              AND IFNULL(a.ZMARKEDFORDELETION, 0) = 0 AND a.ZTYPEUTI IS NOT NULL
+            """) { r throws(NotesError) in
+            guard let id = r.text(0), noteIDs.contains(id) else { return }
+            out[id, default: [:]][AttachmentKind.of(uti: r.text(1) ?? ""), default: 0] += 1
+        }
+        return out
+    }
+
+    /// Store columns this file reads directly. Core Data numbers columns per model, so a macOS
+    /// update could rename them; checked once so that shows up as a clear error.
+    static let requiredColumns = ["ZIDENTIFIER", "ZTITLE1", "ZFOLDER", "ZMODIFICATIONDATE1", "ZCREATIONDATE3", "ZNOTEDATA",
+                                  "ZMARKEDFORDELETION", "ZISPASSWORDPROTECTED", "ZNOTE", "ZTYPEUTI"]
+
     private func open() throws(NotesError) -> SQLiteDatabase {
         if let database { return database }
         let opened = try SQLiteDatabase(path: ReadStore.storeURL.path, readOnly: true)
+        var columns: Set<String> = []
+        try opened.query("PRAGMA table_info(ZICCLOUDSYNCINGOBJECT)") { r throws(NotesError) in if let c = r.text(1) { columns.insert(c) } }
+        let missing = Self.requiredColumns.filter { !columns.contains($0) }
+        guard missing.isEmpty else {
+            throw .frameworkChanged("the Notes database layout changed in this macOS version; missing columns " + missing.joined(separator: ", "))
+        }
         database = opened
         return opened
     }
