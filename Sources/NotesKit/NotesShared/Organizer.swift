@@ -147,9 +147,7 @@ extension NotesRepository {
         try guardChangeable(folder, allowShared: false)
         let path = Self.path(of: folder, multipleAccounts: hasMultipleAccounts)
         let uri = folder.objectID.uriRepresentation().absoluteString
-        let notes = try fetch(store, "ICNote", NSPredicate(format: "markedForDeletion == NO AND folder == %@", folder))
-            .filter { !deletedHere.contains($0.value(forKey: "identifier") as? String ?? "") }
-        // Notes' own view too: the store can lag behind notes just moved in.
+        // Notes' own view decides: the store can lag behind notes just moved in or out.
         let liveNotes = Int(try AppleScript.run("tell application \"Notes\" to count notes of folder id \"\(uri)\"") ?? "") ?? 0
         // Subfolders from both views, kept only if Notes says they exist: the store can still
         // list one just deleted, and `folders of folder` keeps listing folders Notes deleted.
@@ -160,8 +158,8 @@ extension NotesRepository {
         for candidate in candidates where try AppleScript.run("tell application \"Notes\" to exists folder id \"\(candidate)\"") == "true" {
             subfolders += 1
         }
-        if !notes.isEmpty || subfolders > 0 || liveNotes > 0 {
-            throw .refused("\(path) is not empty (\(max(notes.count, liveNotes)) notes, \(subfolders) subfolders); move them out first, or delete the folder in Notes")
+        if subfolders > 0 || liveNotes > 0 {
+            throw .refused("\(path) is not empty (\(liveNotes) notes, \(subfolders) subfolders); move them out first, or delete the folder in Notes")
         }
         try AppleScript.run("tell application \"Notes\" to delete folder id \"\(uri)\"")
         try await waitForNotes("deleting the folder") { () throws(NotesError) in
