@@ -12,5 +12,5 @@
   "bin": {
     "apple-notes-mcp": "bin/apple-notes-mcp"
   },
-  "files": ["bin", "AppleNotesMCP.app", "README.md", "LICENSE"]
+  "files": ["bin", "AppleNotesMCP.app", "README.md", "README.zh-CN.md", "LICENSE"]
 }

@@ -3,6 +3,21 @@
 # re-launches itself so macOS grants permissions to the app rather than to npx or node.
 # Pass "setup" to open the permission window.
 set -e
+# 2.x is auto-installed by `npx …@latest` for 1.x users too, so say plainly what no longer works.
+# 当不再有人从 1.x 升级上来时，删除这两项检查。
+version=$(sw_vers -productVersion 2>/dev/null || echo 0)
+if [ "${version%%.*}" -lt 26 ]; then
+  echo "Apple Notes MCP 2.x needs macOS 26 (Tahoe) or later; this Mac runs macOS $version." >&2
+  echo "Use version 1.x instead: npx -y @ailenshen/apple-notes-mcp@1" >&2
+  exit 1
+fi
+for arg in "$@"; do
+  if [ "$arg" = "--http" ]; then
+    echo "Apple Notes MCP 2.x has no --http mode. Use it over stdio, or see Remote Access in the README;" >&2
+    echo "to keep the 1.x HTTP server: npx -y @ailenshen/apple-notes-mcp@1 --http" >&2
+    exit 1
+  fi
+done
 self=$0
 while [ -L "$self" ]; do  # npm links bin/ into node_modules/.bin
   target=$(readlink "$self")

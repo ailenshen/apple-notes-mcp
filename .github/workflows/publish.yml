@@ -50,7 +50,7 @@ jobs:
       - name: Assemble the npm package
         run: |
           cp -R dist/AppleNotesMCP.app npm/
-          cp README.md LICENSE npm/
+          cp README.md README.zh-CN.md LICENSE npm/
 
       - uses: actions/setup-node@v7
         with:

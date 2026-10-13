@@ -4,6 +4,7 @@ dist/
 # Assembled by the publish workflow
 npm/AppleNotesMCP.app
 npm/README.md
+npm/README.zh-CN.md
 npm/LICENSE
 *.tgz
 .DS_Store

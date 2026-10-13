@@ -1,5 +1,7 @@
 # Apple Notes MCP Server
 
+English | [简体中文](README.zh-CN.md)
+
 Let Claude read and edit your Apple Notes — with **native formatting**, tables, attachments, and iCloud sync.
 
 [![apple-notes-mcp MCP server](https://glama.ai/mcp/servers/ailenshen/apple-notes-mcp/badges/score.svg)](https://glama.ai/mcp/servers/ailenshen/apple-notes-mcp)
@@ -12,7 +14,7 @@ Claude edits your notes the way you would: change one line or tick a checkbox, a
   <img alt="Apple Notes MCP" src="assets/screenshot-light.png">
 </picture>
 
-**Requires:** macOS 26 (Tahoe) or later, [Node.js](https://nodejs.org/) 24+, and Claude Code 2.1.296 or later (or any client speaking MCP 2026-07-28)
+**Requires:** macOS 26 (Tahoe) or later, [Node.js](https://nodejs.org/) 24+, and a client that speaks MCP 2026-07-28: Claude Code 2.1.296 or later, an up-to-date Claude Desktop, or claude.ai
 
 ## Setup
 
@@ -21,16 +23,29 @@ Claude edits your notes the way you would: change one line or tick a checkbox, a
 **Claude Code** — run in Terminal:
 
 ```bash
-claude mcp add apple-notes -- npx -y @ailenshen/apple-notes-mcp@next
+claude mcp add apple-notes -- npx -y @ailenshen/apple-notes-mcp@latest
+```
+
+**Claude Desktop** — add to `~/Library/Application Support/Claude/claude_desktop_config.json`, then restart Claude:
+
+```json
+{
+  "mcpServers": {
+    "apple-notes": {
+      "command": "npx",
+      "args": ["-y", "@ailenshen/apple-notes-mcp@latest"]
+    }
+  }
+}
 ```
 
 **claude.ai** (web and mobile) — see [Remote Access](#remote-access).
 
-> **Claude Desktop** still uses an older MCP version. Keep using version 1.x (`@latest`) there for now.
+`@latest` makes it update itself: each time Claude starts the server, npx checks for a new version and fetches it.
 
 ### 2. Grant permissions
 
-A setup window opens the first time it's needed (or run `npx -y @ailenshen/apple-notes-mcp@next setup`). Turn on two switches for **Apple Notes MCP**:
+A setup window opens the first time it's needed (or run `npx -y @ailenshen/apple-notes-mcp@latest setup`). Turn on two switches for **Apple Notes MCP**:
 
 | Permission | Why |
 |-----------|-----|
@@ -49,6 +64,7 @@ Just talk to Claude:
 - "What's in the photo in my receipts note?"
 - "Move the Hainan trip notes into Travel"
 - "Write a one-line description for every note in Work"
+- "Archive the Old Projects folder to ~/Documents/Archive/old-projects.zip, then delete it"
 
 ## What Can It Do?
 
@@ -62,7 +78,7 @@ Just talk to Claude:
 | `edit_note` | Change text, add under a heading, or rewrite a note — several changes in one go |
 | `describe_note` | Save one-line descriptions, many at once |
 | `move_note` | Move a note to another folder, or restore it from Recently Deleted |
-| `manage_folder` | Create, rename or delete a folder |
+| `manage_folder` | Create, rename or delete a folder; export a folder to disk (Markdown + original attachments, optionally as a .zip), or delete it with everything in it |
 | `delete_note` | Move to Recently Deleted |
 
 Claude never overwrites your own edits: if a note changed after Claude read it, the write is refused. Every note is backed up before a change.
@@ -83,7 +99,14 @@ Claude never overwrites your own edits: if a note changed after Claude read it, 
 
 The server talks over stdio. To use it from claude.ai, put it behind a bridge that forwards HTTP requests to stdio, then add the URL as a custom connector.
 
-Upgrading from 1.x: restart Claude, or reconnect the connector, once.
+## Upgrading from 1.x
+
+Version 2 is a rewrite in Swift, and `@latest` installs it automatically. What changes:
+
+- It needs macOS 26 (Tahoe). On an older Mac, use version 1: `npx -y @ailenshen/apple-notes-mcp@1`.
+- Permissions now belong to the **Apple Notes MCP** app. The setup window opens once; turn on the two switches.
+- Restart Claude, or reconnect the connector, once.
+- The `--http` mode is gone; see [Remote Access](#remote-access). To keep it, stay on `@1`.
 
 ## How It Works
 
@@ -96,7 +119,7 @@ Upgrading from 1.x: restart Claude, or reconnect the connector, once.
 
 - Attachments can be read, not added or removed.
 - Folders can't be moved yet.
-- Locked notes are skipped. Shared notes can be edited, but not deleted.
+- Locked notes can't be read; an export lists them as not exported. Shared notes can be edited, but not deleted.
 - A table you just edited in Notes is rebuilt when Claude changes it, which resets formatting inside its cells.
 
 ## Vision
