@@ -66,7 +66,91 @@ func unitChecks() {
            "short ids expand back: \(expanded)")
     expect(MarkdownParser.parse("![image](attachment:FFFFFFFF)").expandingAttachmentIDs(from: full).attachmentIDsForChecks == ["FFFFFFFF"],
            "an unknown short id is left for the writer to refuse")
+    // Export file names, links and destinations.
+    expect(ExportFiles.name("a/b:c\nd") == "a-b-c d", "export name: \(ExportFiles.name("a/b:c\nd"))")
+    expect(ExportFiles.name("") == "Untitled" && ExportFiles.name(" \u{FFFC} ") == "Untitled", "empty export name")
+    expect(ExportFiles.name("..hidden") == "hidden", "leading dots: \(ExportFiles.name("..hidden"))")
+    let long = ExportFiles.name(String(repeating: "档", count: 100))
+    expect(long.utf8.count <= 200 && long.count == 66, "long Chinese name cut by bytes: \(long.count) chars, \(long.utf8.count) bytes")
+    var used: Set<String> = ["attachments", "manifest.md"]
+    let first = ExportFiles.unique("Note", extension: ".md", id: "4E847B23-CDE2-408A-9A26-4E8642E89BA3", in: &used)
+    let second = ExportFiles.unique("note", extension: ".md", id: "10A0BC5E-7917-4E06-B07D-EEECA1E9E9F7", in: &used)
+    let reserved = ExportFiles.unique("Attachments", id: "4E847B23-CDE2-408A-9A26-4E8642E89BA3", in: &used)
+    expect(first == "Note.md" && second == "note (10A0BC5E).md" && reserved == "Attachments (4E847B23)",
+           "unique names: \(first), \(second), \(reserved)")
+    let link = ExportFiles.link(["attachments", "ID", "IMG 1 (a)档.jpeg"], depth: 2)
+    expect(link == "../../attachments/ID/IMG%201%20%28a%29%E6%A1%A3.jpeg", "export link: \(link)")
+    for refused in ["relative/path", "~/Library/Exports", "~/Documents", "/"] {
+        expect((try? ExportFiles.destination(refused)) == nil, "export destination \(refused) should be refused")
+    }
+    expect((try? ExportFiles.destination("~/Documents/MCP Test export \(UUID().uuidString).zip")) != nil, "a new path under Documents is accepted")
     print(failures == 0 ? "unit: all passed" : "unit: \(failures) failed")
+}
+
+/// Exports a real folder (read-only for Notes) and checks the output: every note is in the
+/// manifest, every copied file is byte-identical to Notes' original, and every link in the
+/// Markdown points at a file that exists. The tools cannot create attachments, so this is
+/// where exporting originals is proven; e2e covers the rest.
+@MainActor
+func exportCheck(folder: String, destination: String) async {
+    let repository = NotesRepository()
+    let start = Date()
+    let outcome: ExportOutcome
+    do {
+        outcome = try await repository.export(folder: folder, to: destination)
+    } catch {
+        print("export failed:", error)
+        failures += 1
+        return
+    }
+    print("export: \(outcome.notes) notes, \(outcome.folders) folders, \(outcome.locked) locked, \(outcome.failed.count) unreadable, "
+        + "\(outcome.files) files, \(outcome.missingFiles) missing, \(String(format: "%.1f", Date().timeIntervalSince(start)))s")
+    let root = URL(fileURLWithPath: outcome.destination)
+    let files = FileManager.default
+    let manifest = (try? String(contentsOf: root.appendingPathComponent("manifest.md"), encoding: .utf8)) ?? ""
+    let rows = manifest.components(separatedBy: "\n").filter { $0.hasPrefix("| ") && !$0.hasPrefix("| ---") }.count - 1
+    expect(rows == outcome.notes, "manifest lists \(rows) notes, not \(outcome.notes)")
+    // Copied files against the originals.
+    var compared = 0
+    let attachments = root.appendingPathComponent("attachments")
+    for id in (try? files.contentsOfDirectory(atPath: attachments.path)) ?? [] {
+        guard let info = try? repository.attachment(id: id) else {
+            expect(false, "attachment \(id) not found in Notes")
+            continue
+        }
+        let sources = info.pages.isEmpty ? [info.file] : info.pages.map(\.file)
+        let copies = ((try? files.contentsOfDirectory(atPath: attachments.appendingPathComponent(id).path)) ?? []).sorted()
+        for (index, copy) in copies.enumerated() {
+            let source = info.pages.isEmpty ? sources.first ?? nil : (Int(copy.dropFirst(5).prefix(2)).flatMap { $0 - 1 < sources.count ? sources[$0 - 1] : nil })
+            let copied = attachments.appendingPathComponent(id).appendingPathComponent(copy)
+            guard let source, let a = try? Data(contentsOf: source), let b = try? Data(contentsOf: copied) else {
+                expect(false, "attachment \(id) file \(index + 1): cannot compare")
+                continue
+            }
+            expect(a == b, "attachment \(id) file \(copy) differs from \(source.path)")
+            compared += 1
+        }
+    }
+    // Links in the Markdown.
+    var links = 0
+    let pattern = try! NSRegularExpression(pattern: #"\]\(((?:\.\./)*attachments/[^)]+)\)"#)
+    let markdownFiles = (files.subpaths(atPath: root.path) ?? []).filter { $0.hasSuffix(".md") && $0 != "manifest.md" }
+    for path in markdownFiles {
+        let file = root.appendingPathComponent(path)
+        // Fenced code is the note's own text, links in it included.
+        var fenced = false
+        let text = ((try? String(contentsOf: file, encoding: .utf8)) ?? "").components(separatedBy: "\n").filter { line in
+            if line.trimmingCharacters(in: CharacterSet(charactersIn: "> ")).hasPrefix("```") { fenced.toggle(); return false }
+            return !fenced
+        }.joined(separator: "\n")
+        for match in pattern.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+            let target = String(text[Range(match.range(at: 1), in: text)!]).removingPercentEncoding ?? ""
+            let resolved = file.deletingLastPathComponent().appendingPathComponent(target).standardizedFileURL
+            expect(files.fileExists(atPath: resolved.path), "\(path) links to a missing file: \(target)")
+            links += 1
+        }
+    }
+    print("export: \(compared) files identical to the originals, \(links) links checked")
 }
 
 @MainActor
@@ -264,6 +348,10 @@ switch command {
 case "unit": unitChecks()
 case "roundtrip": roundTrip()
 case "writetest": await writeTest()
+case "export":
+    // export <folder> <new directory>: read-only for Notes; writes only the directory.
+    let args = Array(CommandLine.arguments.dropFirst(2))
+    if args.count == 2 { await exportCheck(folder: args[0], destination: args[1]) } else { print("usage: NotesKitChecks export <folder> <new directory>") }
 case "create":
     // Reads Markdown from stdin and creates a note with it (write guard on).
     let markdown = String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self)
@@ -273,6 +361,6 @@ case "create":
         let report = try await SyncCoordinator(repository: NotesRepository()).settle(id: outcome.id)
         print("synced:", report.synced)
     } catch { print("error:", error) }
-default: print("usage: NotesKitChecks unit|roundtrip|render <id>…|writetest|create < markdown")
+default: print("usage: NotesKitChecks unit|roundtrip|render <id>…|writetest|export <folder> <dir>|create < markdown")
 }
 exit(failures == 0 ? 0 : 1)

@@ -15,7 +15,9 @@ public enum MarkdownRenderer {
         (.bold, "**", "**"),
     ]
 
-    public static func render(_ blocks: [Block]) -> String {
+    /// `attachment` may give the Markdown for an attachment instead of its placeholder; the export
+    /// uses it to link original files. Such output is for reading, and does not parse back.
+    public static func render(_ blocks: [Block], attachment: ((AttachmentRef) -> String?)? = nil) -> String {
         var lines: [String] = []
         var numbering: [Int: Int] = [:]  // indent → last number, for consecutive numbered items
         var index = 0
@@ -60,7 +62,7 @@ public enum MarkdownRenderer {
                 default:
                     numbering.removeAll()
                 }
-                var text = renderInline(p.content)
+                var text = renderInline(p.content, attachment: attachment)
                 if p.kind == .body, needsLineEscape(text) { text = "\\" + text }
                 lines.append(linePrefix(quote: p.quote, indent: p.indent) + marker + text)
                 index += 1
@@ -83,7 +85,7 @@ public enum MarkdownRenderer {
         return !digits.isEmpty && text.dropFirst(digits.count).hasPrefix(". ")
     }
 
-    static func renderInline(_ content: [Inline]) -> String {
+    static func renderInline(_ content: [Inline], attachment: ((AttachmentRef) -> String?)? = nil) -> String {
         var out = ""
         var open: [Marks] = []  // in canonical order
         func transition(to marks: Marks) {
@@ -108,6 +110,10 @@ public enum MarkdownRenderer {
                 }
             case .attachment(let ref):
                 transition(to: [])
+                if let replacement = attachment?(ref) {
+                    out += replacement
+                    continue
+                }
                 out += "![" + escapeText(ref.label.isEmpty ? ref.kind : ref.kind + ": " + ref.label) + "](attachment:" + ref.id + ")"
             }
         }

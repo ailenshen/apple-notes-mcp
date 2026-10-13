@@ -11,6 +11,19 @@ enum AppleScript {
 
     @discardableResult
     static func run(_ source: String) throws(NotesError) -> String? {
+        try execute(source).stringValue
+    }
+
+    /// A script whose result is a list, such as `id of notes of folder id …`, item by item.
+    /// A list result has no `stringValue` (it is nil, checked 2026-10-14), so `run` cannot read it.
+    static func runList(_ source: String) throws(NotesError) -> [String] {
+        let result = try execute(source)
+        guard result.descriptorType == typeAEList else { return result.stringValue.map { [$0] } ?? [] }
+        guard result.numberOfItems > 0 else { return [] }
+        return (1...result.numberOfItems).compactMap { result.atIndex($0)?.stringValue }
+    }
+
+    private static func execute(_ source: String) throws(NotesError) -> NSAppleEventDescriptor {
         guard let script = NSAppleScript(source: source) else { throw .failed("invalid AppleScript") }
         var info: NSDictionary?
         let result = script.executeAndReturnError(&info)
@@ -22,6 +35,6 @@ enum AppleScript {
             }
             throw .failed("AppleScript error \(number): \(message)")
         }
-        return result.stringValue
+        return result
     }
 }

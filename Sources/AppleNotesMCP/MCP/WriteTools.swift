@@ -204,23 +204,35 @@ struct MoveNoteTool: Tool {
     }
 }
 
+/// Folders: create, rename, delete, and export. Export and recursive delete exist for
+/// archiving a folder in two calls (2026-10-14; before, it took about 375 calls and reading the
+/// store directly). They are modes of this tool rather than tools of their own, because every
+/// tool definition costs tokens on every claude.ai turn. Measured 2026-10-14: these modes add
+/// about 340 characters (~80 tokens) to the definitions; an export tool of its own would add ~450 on top of the delete fields.
 struct ManageFolderTool: Tool {
     let notes: NotesContext
     let name = "manage_folder"
-    let title: String? = "Create, rename or delete a folder"
-    let description = "Creates a folder (folder = its new path), renames one, or deletes an empty one. Renaming a shared folder needs allow_shared, after asking the user."
+    let title: String? = "Create, rename, delete or export a folder"
+    let description = """
+        Creates (folder = new path), renames, deletes or exports a folder. delete: empty, or recursive with expected_notes \
+        (notes go to Recently Deleted). export: subfolders too, as Markdown and original attachments, to a new directory \
+        or .zip. Renaming a shared folder needs allow_shared, after asking the user.
+        """
     let inputSchema = schema([
-        "action": ["type": "string", "enum": ["create", "rename", "delete"], "description": "create, rename or delete"],
+        "action": ["type": "string", "enum": ["create", "rename", "delete", "export"]],
         "folder": stringProperty("Path or id (for create, the new path)"),
         "name": stringProperty("New name, for rename"),
+        "to": stringProperty("Export: new directory or .zip path"),
+        "recursive": ["type": "boolean"],
+        "expected_notes": ["type": "integer", "description": "Notes you saw, subfolders included"],
         "allow_shared": ["type": "boolean", "description": "The user agreed to renaming a shared folder"],
     ], required: ["action", "folder"])
     let annotations = ToolAnnotations(destructive: true, idempotent: false)
 
     func call(_ arguments: [String: JSONValue]) async throws -> ToolResult {
         let args = Arguments(arguments)
-        let action = try args.choice("action", ["create", "rename", "delete"], default: "")
-        guard !action.isEmpty else { throw MCPError.invalidParams("action must be create, rename or delete") }
+        let action = try args.choice("action", ["create", "rename", "delete", "export"], default: "")
+        guard !action.isEmpty else { throw MCPError.invalidParams("action must be create, rename, delete or export") }
         let folder = try args.string("folder")
         return try await writeResult {
             switch action {
@@ -232,12 +244,45 @@ struct ManageFolderTool: Tool {
                 let renamed = try await notes.repository.renameFolder(folder, to: name, allowShared: try args.bool("allow_shared", default: false))
                 return ToolResult("Renamed \(renamed.old) to \(renamed.new).")
             case "delete":
-                let path = try await notes.repository.deleteFolder(folder)
-                return ToolResult("Deleted the empty folder \(path).")
+                guard try args.bool("recursive", default: false) else {
+                    let path = try await notes.repository.deleteFolder(folder)
+                    return ToolResult("Deleted the empty folder \(path).")
+                }
+                let expected = try args.int("expected_notes", default: -1, range: -1...1_000_000)
+                guard expected >= 0 else {
+                    throw MCPError.invalidParams("recursive needs expected_notes: the number of notes you saw in the folder, subfolders included")
+                }
+                let deleted = try await notes.repository.deleteFolderTree(folder, expectedNotes: expected)
+                return ToolResult("Moved \(deleted.notes) note\(deleted.notes == 1 ? "" : "s") to Recently Deleted and deleted \(deleted.folders) "
+                    + "folder\(deleted.folders == 1 ? "" : "s") (\(deleted.path) and below).")
+            case "export":
+                guard let to = try args.optionalString("to") else { throw MCPError.invalidParams("export needs to: a new directory or .zip path") }
+                return exportReport(try await notes.repository.export(folder: folder, to: to))
             default:
-                throw MCPError.invalidParams("action must be create, rename or delete")
+                throw MCPError.invalidParams("action must be create, rename, delete or export")
             }
         }
+    }
+
+    /// A few lines whatever the size of the folder: totals, problems, and what a delete needs.
+    private func exportReport(_ out: ExportOutcome) -> ToolResult {
+        let exported = out.notes - out.locked - out.failed.count
+        var lines = ["Exported \(out.path): \(exported) of \(out.notes) notes in \(out.folders) folder\(out.folders == 1 ? "" : "s"), "
+            + "\(out.files) attachment file\(out.files == 1 ? "" : "s") in original format, to \(out.destination). Every note is listed in manifest.md there."]
+        var problems: [String] = []
+        if out.locked > 0 { problems.append("\(out.locked) locked note\(out.locked == 1 ? " was" : "s were") not exported (Notes keeps them encrypted)") }
+        if out.missingFiles > 0 { problems.append("\(out.missingFiles) attachment\(out.missingFiles == 1 ? " is" : "s are") missing (not on this Mac)") }
+        if !out.failed.isEmpty {
+            problems.append("\(out.failed.count) note\(out.failed.count == 1 ? "" : "s") could not be read: " + out.failed.prefix(5).joined(separator: "; ")
+                + (out.failed.count > 5 ? "; …" : ""))
+        }
+        if !problems.isEmpty { lines.append("Check before deleting the folder: " + problems.joined(separator: "; ") + ". Details in manifest.md.") }
+        if out.locked > 0 {
+            lines.append("Locked notes block deleting the folder with its contents; unlock them or move them out in Notes first.")
+        } else {
+            lines.append("To delete the folder with its contents (after the user agrees): action delete, recursive: true, expected_notes: \(out.notes).")
+        }
+        return ToolResult(lines.joined(separator: "\n"), isError: !out.failed.isEmpty)
     }
 }
 

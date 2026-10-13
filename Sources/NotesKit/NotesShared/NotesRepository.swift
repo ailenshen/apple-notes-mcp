@@ -14,6 +14,9 @@ public final class NotesRepository {
     /// Notes deleted by this process. The store may show them in their old folder for minutes
     /// (Notes.app saves lazily in the background), so reads treat them as deleted until then.
     public internal(set) var deletedHere: Set<String> = []
+    /// Folders deleted by this process, hidden for the same reason: after a recursive delete,
+    /// the store kept listing the folders for minutes (seen 2026-10-14).
+    var deletedFoldersHere: Set<String> = []
 
     /// While set, writes only touch notes whose title starts with this prefix. Development
     /// builds and the checks set it to "MCP Test " so real notes are never written by accident.
@@ -403,7 +406,7 @@ public final class NotesRepository {
         for note in notes where !deletedHere.contains(note.value(forKey: "identifier") as? String ?? "") {
             if let folder = note.value(forKey: "folder") as? NSManagedObject { counts[folder.objectID, default: 0] += 1 }
         }
-        return folders.map { folder in
+        return folders.filter { !deletedFoldersHere.contains($0.value(forKey: "identifier") as? String ?? "") }.map { folder in
             let names = Self.names(of: folder, multipleAccounts: hasMultipleAccounts)
             return FolderSnapshot(
                 id: folder.value(forKey: "identifier") as? String ?? "",
@@ -557,11 +560,16 @@ public final class NotesRepository {
 
     /// The Recently Deleted folder of the note's account, as an AppleScript id.
     private func trashFolderURI(forNote id: String) throws(NotesError) -> String {
-        let store = try store()
-        let note = try store.note(id: id)
-        let account = (note.value(forKey: "folder") as? NSManagedObject)?.value(forKey: "account") as? NSManagedObject
-        let trash = try fetch(store, "ICFolder", NSPredicate(format: "folderType == 1 AND markedForDeletion == NO"))
-            .first { account == nil || ($0.value(forKey: "account") as? NSManagedObject) == account }
+        let note = try store().note(id: id)
+        return try trashFolderURI(sameAccountAs: note.value(forKey: "folder") as? NSManagedObject)
+    }
+
+    /// The Recently Deleted folder of a folder's account, as an AppleScript id. Accounts are
+    /// compared by identifier: the related objects are not always the same instance.
+    func trashFolderURI(sameAccountAs folder: NSManagedObject?) throws(NotesError) -> String {
+        let account = folder.flatMap(Self.accountID(of:))
+        let trash = try fetch(try store(), "ICFolder", NSPredicate(format: "folderType == 1 AND markedForDeletion == NO"))
+            .first { account == nil || Self.accountID(of: $0) == account }
         guard let trash else { throw .failed("cannot find the Recently Deleted folder") }
         return trash.objectID.uriRepresentation().absoluteString
     }

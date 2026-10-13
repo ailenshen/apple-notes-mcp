@@ -2,7 +2,8 @@
 """End-to-end check of the stdio server on a throwaway "MCP Test" note.
 
 overview → search → create → search → read → describe → append → edit → update → delete,
-then confirms the note sits in Recently Deleted and search no longer finds it. Writes are fenced by
+then confirms the note sits in Recently Deleted and search no longer finds it. Then archives an
+"MCP Test" folder tree: export to a directory and a .zip, refusals, and a recursive delete. Writes are fenced by
 APPLE_NOTES_MCP_WRITE_GUARD, so only notes titled "MCP Test …" can be touched.
 """
 import json, os, re, subprocess, sys, time, uuid
@@ -128,7 +129,9 @@ check("move_note back to Notes", not err, text)
 err, text = call("manage_folder", action="delete", folder=folder + " renamed")
 check("manage_folder deletes the empty folder", not err, text)
 
-err, text = call("delete_note", id="F19E73FE-16C9-4B0B-9FF0-7DDCB660F513")
+# Any real note outside Recently Deleted will do; the write guard must stop the delete before Notes sees it.
+real = next((m.group(1) for m in re.finditer(r"^([0-9A-F]{8}) \| (?!MCP Test)", call("overview", sort="modified", limit=50)[1], re.M)), None)
+err, text = call("delete_note", id=real) if real else (True, "write guard (no real note to try)")
 check("write guard refuses a real note", err and "write guard" in text, text)
 err, text = call("delete_note", id=note_id)
 check("delete_note", not err and "Recently Deleted" in text, text)
@@ -143,6 +146,57 @@ err, text = call("read_note", id=note_id)
 check("the note is in Recently Deleted", "in Recently Deleted" in text, text[:200])
 err, text = call("search", query=f"zebra{tag}")
 check("search no longer finds it", "No notes match" in text, text)
+
+# Archiving a folder tree: export it (folder and zip), then delete it with its notes.
+import shutil, tempfile, zipfile
+tree = f"MCP Test e2e tree {tag}"
+sub = f"{tree}/MCP Test sub {tag}"
+check("create a folder tree", not call("manage_folder", action="create", folder=tree)[0] and not call("manage_folder", action="create", folder=sub)[0])
+tree_notes = []
+for i, where in enumerate([tree, tree, sub]):
+    err, text = call("create_note", markdown=f"# MCP Test e2e tree note {i} {tag}\nArchive me, yak{tag}.")
+    tree_notes.append(re.search(r"id: ([0-9A-F]{8})\b", text).group(1) if not err else "")
+    check(f"tree note {i} moved into place", not err and not call("move_note", id=tree_notes[-1], folder=where)[0])
+# Export and delete read the store, which can lag Notes by a while.
+for _ in range(60):
+    err, text = call("overview", folder=tree)
+    if "— 3 notes" in text: break
+    time.sleep(2)
+check("the store shows the tree with 3 notes", "— 3 notes" in text, text)
+out = tempfile.mkdtemp(prefix="mcp-e2e-export-")
+err, text = call("manage_folder", action="export", folder=tree, to=f"{out}/tree")
+manifest = open(f"{out}/tree/manifest.md").read() if os.path.exists(f"{out}/tree/manifest.md") else ""
+check("export a folder tree to a directory", not err and "3 of 3 notes" in text and "expected_notes: 3" in text, text)
+check("the export holds every note, subfolder included",
+      manifest.count("| exported |") == 3 and os.path.exists(f"{out}/tree/MCP Test sub {tag}/MCP Test e2e tree note 2 {tag}.md"), manifest)
+err, text = call("manage_folder", action="export", folder=tree, to=f"{out}/tree")
+check("export refuses an existing destination", err and "already exists" in text, text)
+err, text = call("manage_folder", action="export", folder=tree, to="~/Library/MCP Test export")
+check("export refuses ~/Library", err and "Library" in text, text)
+err, text = call("manage_folder", action="export", folder=tree, to=f"{out}/tree.zip")
+names = zipfile.ZipFile(f"{out}/tree.zip").namelist() if not err else []
+check("export to a .zip", not err and "tree/manifest.md" in names and any(n.endswith(f"note 2 {tag}.md") for n in names), text + str(names))
+check("the zip leaves no temporary folder", sorted(os.listdir(out)) == ["tree", "tree.zip"], str(os.listdir(out)))
+shutil.rmtree(out)
+
+err, text = call("manage_folder", action="delete", folder=tree, recursive=True)
+check("recursive delete needs expected_notes", err and "expected_notes" in text, text)
+err, text = call("manage_folder", action="delete", folder=tree, recursive=True, expected_notes=2)
+check("recursive delete refuses a wrong count", err and "expected_notes" in text and "Nothing was deleted" in text, text)
+err, text = call("overview", folder=tree)
+check("nothing moved after the refusal", "— 3 notes" in text, text)
+err, text = call("manage_folder", action="delete", folder="清单", recursive=True, expected_notes=0)
+check("write guard refuses a real folder tree", err and "write guard" in text, text)
+started = time.time()
+err, text = call("manage_folder", action="delete", folder=tree, recursive=True, expected_notes=3)
+print(f"     (recursive delete of 3 notes and 2 folders took {time.time() - started:.1f}s)")
+check("recursive delete moves the notes and removes both folders", not err and "Moved 3 notes" in text and "2 folders" in text, text)
+check("every tree note is in Recently Deleted", all("in Recently Deleted" in call("read_note", id=n)[1] for n in tree_notes))
+err, text = call("search", query=f"yak{tag}")
+check("search no longer finds the tree notes", "No notes match" in text, text)
+# The store lists deleted folders for minutes; this process hides the ones it deleted.
+err, text = call("overview", depth=10)
+check("the tree's folders are gone", tree not in text, text[:300])
 proc.stdin.close()
 proc.wait(timeout=10)
 sys.exit(1 if failures else 0)
