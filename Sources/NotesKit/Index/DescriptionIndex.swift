@@ -60,9 +60,12 @@ public actor DescriptionIndex {
     public func get(_ id: String) throws(NotesError) -> NoteDescription? { try all()[id] }
 
     /// Fallback: the first heading under the title, else the first sentence of the body.
+    /// Lines without a letter or digit (separators such as "⸻", rows of emoji) are skipped:
+    /// one note's description came out as "⸻" (2026-10-14).
     public static func extract(fromPlainText text: String, title: String) -> String {
         let lines = text.replacingOccurrences(of: "\u{FFFC}", with: "").components(separatedBy: "\n")
-            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { line in line.unicodeScalars.contains { CharacterSet.alphanumerics.contains($0) } }
         let body = lines.first == title ? Array(lines.dropFirst()) : lines
         guard let first = body.first else { return "" }
         let sentenceEnd = first.firstIndex(where: { "。！？.!?".contains($0) }).map { first.index(after: $0) } ?? first.endIndex

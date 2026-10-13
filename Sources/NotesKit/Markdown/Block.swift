@@ -97,21 +97,73 @@ public struct Table: Sendable, Equatable {
 }
 
 extension Array where Element == Inline {
-    /// Joins neighbouring text runs that look the same, so hidden attributes that split
-    /// runs (font, timestamps) do not show up as separate runs.
-    func coalesced() -> [Inline] {
-        var out: [Inline] = []
+    /// The form both Reader and MarkdownParser produce. Neighbouring text runs that look the
+    /// same are joined, so hidden attributes that split runs (font, timestamps) do not show up
+    /// as separate runs. Bold, italic and strikethrough are taken off whitespace at the edges of
+    /// each span that carries them, because Markdown cannot open `**`, `*` or `~~` before a space or close one after it: `## 🌾** 草原**`
+    /// shows literal asterisks in every other Markdown reader, exported files included (seen
+    /// 2026-10-14). On a space these marks hardly show. Underline and highlight are HTML tags,
+    /// which allow spaces, so they keep them.
+    /// 当需要兼顾 CommonMark 对标点的 flanking 规则（例如 `字**「粗」**字` 同样不被识别）时，在这里一并处理。
+    func normalized() -> [Inline] {
+        var units: [InlineUnit] = []
         for item in self {
-            if case .text(let next) = item, case .text(let last)? = out.last, last.marks == next.marks,
-                last.link == next.link
-            {
-                out[out.count - 1] = .text(TextRun(last.text + next.text, marks: last.marks, link: last.link))
-            } else if case .text(let next) = item, next.text.isEmpty {
-                continue
-            } else {
-                out.append(item)
+            switch item {
+            case .text(let run): units += run.text.map { .character($0, run.marks, run.link) }
+            case .attachment(let ref): units.append(.attachment(ref))
             }
         }
+        func carries(_ i: Int, _ mark: Marks) -> Bool {
+            if case .character(_, let marks, _) = units[i] { return marks.contains(mark) }
+            return false
+        }
+        for mark in [Marks.bold, .italic, .strike] {
+            var start = 0
+            while start < units.count {
+                guard carries(start, mark) else {
+                    start += 1
+                    continue
+                }
+                var end = start
+                while end + 1 < units.count, carries(end + 1, mark) { end += 1 }
+                func lift(_ i: Int) -> Bool {
+                    guard case .character(let c, var marks, let link) = units[i], c.isWhitespace else { return false }
+                    marks.remove(mark)
+                    units[i] = .character(c, marks, link)
+                    return true
+                }
+                var first = start
+                while first <= end, lift(first) { first += 1 }
+                var last = end
+                while last > first, lift(last) { last -= 1 }
+                start = end + 1
+            }
+        }
+        // Rebuilt run by run (not character by character), so long paragraphs stay linear.
+        var out: [Inline] = []
+        var run: TextRun?
+        for unit in units {
+            switch unit {
+            case .character(let c, let marks, let link):
+                if run?.marks == marks, run?.link == link {
+                    run?.text.append(c)
+                } else {
+                    if let run { out.append(.text(run)) }
+                    run = TextRun(String(c), marks: marks, link: link)
+                }
+            case .attachment(let ref):
+                if let run { out.append(.text(run)) }
+                run = nil
+                out.append(.attachment(ref))
+            }
+        }
+        if let run { out.append(.text(run)) }
         return out
     }
+}
+
+/// One character of a paragraph with its marks and link, or an attachment (see `normalized`).
+private enum InlineUnit {
+    case character(Character, Marks, String?)
+    case attachment(AttachmentRef)
 }

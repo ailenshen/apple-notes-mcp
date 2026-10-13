@@ -23,9 +23,10 @@ func writeReport(_ verb: String, _ outcome: WriteOutcome, notes: NotesContext) a
         cloud += "; the edited table was rebuilt so iCloud would take it, which reset formatting inside its cells"
     }
     var text = "\(verb) \"\(outcome.title)\". id: \(ShortID.of(outcome.id)) | version: \(outcome.version) | \(cloud)."
+    // A read-back difference is a warning, not an error: the write happened, and a client that
+    // treats the result as failed may retry and create or insert it a second time.
     if let mismatch = outcome.mismatch {
         text += "\nWarning: the note does not read back exactly as written — \(mismatch). Read it again before further edits."
-        return ToolResult(text, isError: true)
     }
     return ToolResult(text)
 }
@@ -145,17 +146,19 @@ private func listKind(_ kind: ParagraphKind) -> String? {
 }
 
 /// The line sharing the longest prefix with the first line of `needle`, to help the model
-/// fix a near miss.
-func closestLine(to needle: String, in markdown: String) -> String {
+/// fix a near miss. Nil when no line shares at least two characters (one for a one-character
+/// needle): pointing at an unrelated line, or at an empty one, only misleads.
+func closestLine(to needle: String, in markdown: String) -> String? {
     let target = needle.components(separatedBy: "\n").first ?? needle
-    var best = ("", 0)
+    var best: (line: String, score: Int)?
     for line in markdown.components(separatedBy: "\n") {
         let shared = zip(line, target).prefix(while: { $0 == $1 }).count
         let contains = (1...max(1, target.count)).reversed().first { line.contains(target.prefix($0)) } ?? 0
         let score = max(shared, contains)
-        if score > best.1 { best = (line, score) }
+        if score > (best?.score ?? 0) { best = (line, score) }
     }
-    return best.0
+    guard let best, best.score >= min(2, target.count), !best.line.isEmpty else { return nil }
+    return best.line
 }
 
 struct DeleteNoteTool: Tool {
@@ -342,7 +345,9 @@ struct EditNoteTool: Tool {
                     var markdown = MarkdownRenderer.render(blocks.mappingAttachmentIDs(ShortID.of))
                     for (old, new, all) in pairs {
                         let count = markdown.components(separatedBy: old).count - 1
-                        if count == 0 { throw .notFound("\"\(old)\" in the note. Closest line: \"\(closestLine(to: old, in: markdown))\"") }
+                        if count == 0 {
+                            throw .notFound("\"\(old)\" in the note" + (closestLine(to: old, in: markdown).map { ". Closest line: \"\($0)\"" } ?? "; read the note again"))
+                        }
                         if count > 1, !all { throw .refused("\"\(old)\" appears \(count) times; add context or set all") }
                         markdown = markdown.replacingOccurrences(of: old, with: new)
                     }

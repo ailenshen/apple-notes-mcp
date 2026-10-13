@@ -17,6 +17,12 @@ public final class NotesRepository {
     /// Folders deleted by this process, hidden for the same reason: after a recursive delete,
     /// the store kept listing the folders for minutes (seen 2026-10-14).
     var deletedFoldersHere: Set<String> = []
+    /// New names of folders renamed by this process, until the store shows them. After a
+    /// rename the store kept the old name for over two minutes (seen 2026-10-14), so the new
+    /// name was "not found" and lists showed the old one. An entry ends when the store catches
+    /// up, or after `renameOverlayLifetime`, so a later rename made in Notes is not hidden.
+    var renamedFoldersHere: [String: (name: String, at: Date)] = [:]
+    static let renameOverlayLifetime: TimeInterval = 10 * 60
 
     /// While set, writes only touch notes whose title starts with this prefix. Development
     /// builds and the checks set it to "MCP Test " so real notes are never written by accident.
@@ -369,9 +375,9 @@ public final class NotesRepository {
         return NoteSnapshot(
             id: note.value(forKey: "identifier") as? String ?? "",
             title: note.value(forKey: "title") as? String ?? "",
-            folder: folder?.value(forKey: "title") as? String ?? "",
+            folder: folder.map { title(of: $0) } ?? "",
             folderID: folder?.value(forKey: "identifier") as? String ?? "",
-            folderPath: folder.map { Self.path(of: $0, multipleAccounts: hasMultipleAccounts) } ?? "",
+            folderPath: folder.map { self.path(of: $0) } ?? "",
             modified: note.value(forKey: "modificationDate") as? Date ?? .distantPast,
             created: note.value(forKey: "creationDate") as? Date ?? .distantPast,
             isPinned: (note.value(forKey: "isPinned") as? Bool) ?? false,
@@ -407,12 +413,12 @@ public final class NotesRepository {
             if let folder = note.value(forKey: "folder") as? NSManagedObject { counts[folder.objectID, default: 0] += 1 }
         }
         return folders.filter { !deletedFoldersHere.contains($0.value(forKey: "identifier") as? String ?? "") }.map { folder in
-            let names = Self.names(of: folder, multipleAccounts: hasMultipleAccounts)
+            let names = self.names(of: folder)
             return FolderSnapshot(
                 id: folder.value(forKey: "identifier") as? String ?? "",
                 path: FolderPath.join(names),
                 noteCount: counts[folder.objectID] ?? 0,
-                name: folder.value(forKey: "title") as? String ?? "",
+                name: title(of: folder),
                 names: names,
                 parentID: (folder.value(forKey: "parent") as? NSManagedObject)?.value(forKey: "identifier") as? String)
         }.sorted { a, b in
@@ -452,7 +458,7 @@ public final class NotesRepository {
         for folder in folders {
             let last = folder.objectID.uriRepresentation().lastPathComponent
             if last.hasPrefix("p"), let pk = Int64(last.dropFirst()) {
-                out[pk] = Self.path(of: folder, multipleAccounts: hasMultipleAccounts)
+                out[pk] = self.path(of: folder)
             }
         }
         return out
@@ -477,21 +483,33 @@ public final class NotesRepository {
         throw .refused("folder \"\(reference)\" is ambiguous: " + byLeaf.map { "\($0.path) (id \(ShortID.of($0.id)))" }.joined(separator: ", "))
     }
 
-    static func path(of folder: NSManagedObject, multipleAccounts: Bool) -> String {
-        FolderPath.join(names(of: folder, multipleAccounts: multipleAccounts))
+    func path(of folder: NSManagedObject) -> String {
+        FolderPath.join(names(of: folder))
     }
 
-    static func names(of folder: NSManagedObject, multipleAccounts: Bool) -> [String] {
+    func names(of folder: NSManagedObject) -> [String] {
         var parts: [String] = []
         var current: NSManagedObject? = folder
         while let f = current {
-            parts.insert(f.value(forKey: "title") as? String ?? "", at: 0)
+            parts.insert(title(of: f), at: 0)
             current = f.value(forKey: "parent") as? NSManagedObject
         }
-        if multipleAccounts, let account = (folder.value(forKey: "account") as? NSManagedObject)?.value(forKey: "name") as? String {
+        if hasMultipleAccounts, let account = (folder.value(forKey: "account") as? NSManagedObject)?.value(forKey: "name") as? String {
             parts.insert(account, at: 0)
         }
         return parts
+    }
+
+    /// A folder's name as Notes shows it: the store's, unless this process renamed the folder
+    /// and the store has not caught up yet.
+    func title(of folder: NSManagedObject) -> String {
+        let stored = folder.value(forKey: "title") as? String ?? ""
+        guard let id = folder.value(forKey: "identifier") as? String, let renamed = renamedFoldersHere[id] else { return stored }
+        if stored == renamed.name || Date().timeIntervalSince(renamed.at) > Self.renameOverlayLifetime {
+            renamedFoldersHere[id] = nil
+            return stored
+        }
+        return renamed.name
     }
 
     static func isTrash(_ folder: NSManagedObject?) -> Bool {

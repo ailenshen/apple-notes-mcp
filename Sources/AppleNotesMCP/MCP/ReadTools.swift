@@ -379,7 +379,7 @@ struct ReadNoteTool: Tool {
             var refs = givenID.map { [$0] } ?? givenIDs
             if let givenTitle {
                 let matches = try await notes.repository.notes(titled: givenTitle)
-                if matches.isEmpty { return "No note is titled \"\(givenTitle)\". Use search to find it." }
+                if matches.isEmpty { throw NotesError.notFound("a note titled \"\(givenTitle)\"; use search to find it") }
                 if matches.count > 1 {
                     return (["\(matches.count) notes are titled \"\(givenTitle)\"; read one by id:"]
                         + matches.map { "\(ShortID.of($0.id)) | \($0.folderPath) | \(day($0.modified))" }).joined(separator: "\n")
@@ -409,8 +409,10 @@ struct ReadNoteTool: Tool {
         if !notes.isFresh(try await notes.index.get(id), modified: note.modified) { header += " | needs description" }
         let shown = blocks.mappingAttachmentIDs(ShortID.of)
         if outline {
-            // Sizes are of each section as read_note would return it.
-            var lines = [header + " | \(MarkdownRenderer.render(shown).count) chars", "---"]
+            // Sizes are of each section as read_note would return it (Markdown). No total: the
+            // one overview and search show counts plain text, and two different totals for
+            // one note read as a contradiction (seen 2026-10-14: 472 vs 658).
+            var lines = [header, "---"]
             let firstHeading = shown.indices.first { headingLevel(shown[$0]).map { $0 > 1 } ?? false } ?? shown.count
             let intro = MarkdownRenderer.render(Array(shown[..<firstHeading])).count
             if intro > 0 { lines.append("(before the first heading) — \(intro) chars") }

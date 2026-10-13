@@ -52,7 +52,7 @@ extension NotesRepository {
         for _ in 0..<20 {
             if try AppleScript.run("tell application \"Notes\" to (id of notes of folder id \"\(target.uri)\") contains \"\(noteURI)\"") == "true" {
                 deletedHere.remove(id)
-                let from = restoring ? "Recently Deleted" : source.map { Self.path(of: $0, multipleAccounts: hasMultipleAccounts) } ?? "?"
+                let from = restoring ? "Recently Deleted" : source.map { self.path(of: $0) } ?? "?"
                 return MoveOutcome(title: title, from: from, to: target.path, restored: restoring)
             }
             try? await Task.sleep(for: .milliseconds(250))
@@ -88,7 +88,13 @@ extension NotesRepository {
         let container: String
         let siblings: [NSManagedObject]
         if parts.count > 1 {
-            let parent = try folderObject(FolderPath.join(Array(parts.dropLast())), in: store)
+            let parentPath = FolderPath.join(Array(parts.dropLast()))
+            let parent: NSManagedObject
+            do throws(NotesError) {
+                parent = try folderObject(parentPath, in: store)
+            } catch .notFound {
+                throw .notFound("folder \"\(parentPath)\": create it first, one level per call")
+            }
             if Self.isSharedFolder(parent) { throw .refused("folders are not created inside shared folders here") }
             container = "folder id \"\(parent.objectID.uriRepresentation().absoluteString)\""
             siblings = try children(of: parent, in: store)
@@ -97,7 +103,7 @@ extension NotesRepository {
             container = "account id \"\(account.objectID.uriRepresentation().absoluteString)\""
             siblings = try fetch(store, "ICFolder", NSPredicate(format: Self.visibleFolder + " AND parent == nil AND account == %@ AND folderType == 0", account))
         }
-        if siblings.contains(where: { ($0.value(forKey: "title") as? String)?.lowercased() == name.lowercased() }) {
+        if siblings.contains(where: { title(of: $0).lowercased() == name.lowercased() }) {
             throw .refused("a folder named \"\(name)\" already exists there")
         }
         guard let created = try AppleScript.run("tell application \"Notes\" to get id of (make new folder at \(container) with properties {name:\(AppleScript.quoted(name))})") else {
@@ -115,7 +121,7 @@ extension NotesRepository {
         store.refresh()
         let folder = try folderObject(reference, in: store)
         try guardChangeable(folder, allowShared: allowShared)
-        let old = Self.path(of: folder, multipleAccounts: hasMultipleAccounts)
+        let old = self.path(of: folder)
         if let prefix = writeGuardTitlePrefix, !name.hasPrefix(prefix) {
             throw .refused("refusing to rename: folder names must start with \"\(prefix)\" while the write guard is on")
         }
@@ -126,7 +132,7 @@ extension NotesRepository {
             siblings = try fetch(store, "ICFolder", NSPredicate(format: Self.visibleFolder + " AND parent == nil AND account == %@ AND folderType == 0",
                                                                 (folder.value(forKey: "account") as? NSManagedObject) ?? NSNull()))
         }
-        if siblings.contains(where: { $0 != folder && ($0.value(forKey: "title") as? String)?.lowercased() == name.lowercased() }) {
+        if siblings.contains(where: { $0 != folder && title(of: $0).lowercased() == name.lowercased() }) {
             throw .refused("a folder named \"\(name)\" already exists there")
         }
         let uri = folder.objectID.uriRepresentation().absoluteString
@@ -134,6 +140,7 @@ extension NotesRepository {
         try await waitForNotes("renaming the folder") { () throws(NotesError) in
             try AppleScript.run("tell application \"Notes\" to name of folder id \"\(uri)\"") == name
         }
+        if let id = folder.value(forKey: "identifier") as? String { renamedFoldersHere[id] = (name, Date()) }
         let new = FolderPath.join(Array(FolderPath.split(old).dropLast()) + [name])
         return (old, new)
     }
@@ -145,7 +152,7 @@ extension NotesRepository {
         store.refresh()
         let folder = try folderObject(reference, in: store)
         try guardChangeable(folder, allowShared: false)
-        let path = Self.path(of: folder, multipleAccounts: hasMultipleAccounts)
+        let path = self.path(of: folder)
         let uri = folder.objectID.uriRepresentation().absoluteString
         // Notes' own view decides: the store can lag behind notes just moved in or out.
         let liveNotes = Int(try AppleScript.run("tell application \"Notes\" to count notes of folder id \"\(uri)\"") ?? "") ?? 0
@@ -158,7 +165,8 @@ extension NotesRepository {
             subfolders += 1
         }
         if subfolders > 0 || liveNotes > 0 {
-            throw .refused("\(path) is not empty (\(liveNotes) notes, \(subfolders) subfolders); move them out first, or delete the folder in Notes")
+            throw .refused("\(path) is not empty (\(liveNotes) notes, \(subfolders) subfolders directly in it). To delete it with its contents, "
+                + "after the user agrees: recursive: true and expected_notes (every note in it, subfolders included, as overview counts them)")
         }
         try AppleScript.run("tell application \"Notes\" to delete folder id \"\(uri)\"")
         let id = folder.value(forKey: "identifier") as? String ?? ""
@@ -189,7 +197,7 @@ extension NotesRepository {
         store.refresh()
         let root = try folderObject(reference, in: store)
         try guardChangeable(root, allowShared: false)
-        let rootPath = Self.path(of: root, multipleAccounts: hasMultipleAccounts)
+        let rootPath = self.path(of: root)
         let trash = try trashFolderURI(sameAccountAs: root)
         // The tree in breadth-first order, so reversed it lists every child before its parent.
         var tree = [root]
@@ -201,11 +209,11 @@ extension NotesRepository {
         var problems: [String] = []
         var targets: [(id: String, uri: String)] = []
         for folder in tree {
-            let path = Self.path(of: folder, multipleAccounts: hasMultipleAccounts)
+            let path = self.path(of: folder)
             let uri = folder.objectID.uriRepresentation().absoluteString
             if folder.value(forKey: "smartFolderQueryJSON") != nil { problems.append("\(path) is a smart folder") }
             if folder != root, folder.value(forKey: "serverShareData") != nil { problems.append("\(path) is shared") }
-            if let prefix = writeGuardTitlePrefix, (folder.value(forKey: "title") as? String)?.hasPrefix(prefix) != true {
+            if let prefix = writeGuardTitlePrefix, !title(of: folder).hasPrefix(prefix) {
                 problems.append("\(path) is not named \"\(prefix)…\" (write guard)")
             }
             let notes = try fetch(store, "ICNote", NSPredicate(format: "markedForDeletion == NO AND folder == %@", folder))
@@ -331,7 +339,7 @@ extension NotesRepository {
         do throws(NotesError) {
             let folder = try folderObject(reference, in: store)
             if Self.isTrash(folder) { throw .refused("use delete_note to move a note to Recently Deleted") }
-            return FolderTarget(uri: folder.objectID.uriRepresentation().absoluteString, path: Self.path(of: folder, multipleAccounts: hasMultipleAccounts),
+            return FolderTarget(uri: folder.objectID.uriRepresentation().absoluteString, path: self.path(of: folder),
                                 accountID: Self.accountID(of: folder), isShared: Self.isSharedFolder(folder))
         } catch .notFound {
             let parts = FolderPath.split(reference)
@@ -358,7 +366,7 @@ extension NotesRepository {
         if Self.isSharedFolder(folder), !allowShared {
             throw .refused("this folder is shared; renaming it changes it for everyone. Ask the user, then pass allow_shared: true (shared folders are never deleted here)")
         }
-        if let prefix = writeGuardTitlePrefix, (folder.value(forKey: "title") as? String)?.hasPrefix(prefix) != true {
+        if let prefix = writeGuardTitlePrefix, !title(of: folder).hasPrefix(prefix) {
             throw .refused("refusing to change folder: only folders named \"\(prefix)…\" may be changed while the write guard is on")
         }
     }

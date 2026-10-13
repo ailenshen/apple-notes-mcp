@@ -314,6 +314,108 @@ public enum ExportFiles {
             throw .failed("could not start ditto to make the zip: \(error.localizedDescription)")
         }
         guard status == 0 else { throw .failed("ditto could not make the zip (exit status \(status))") }
+        try markNamesAsUTF8(archive)
+    }
+
+    /// Sets the "names are UTF-8" flag (general purpose bit 11) on every entry. ditto writes
+    /// UTF-8 names without the flag, so Windows, Python and unzip read Chinese names as garbage
+    /// (seen 2026-10-14), and /usr/bin/zip on macOS is built without Unicode support. Only that
+    /// flag changes; the flags are outside every checksum. Zip64 archives are handled, since
+    /// an archive with videos can pass 4 GB.
+    /// 当 macOS 自带的 ditto 或 zip 能自己写这个标志（或 Foundation 提供 zip API）时，删掉这段补丁。
+    public static func markNamesAsUTF8(_ archive: URL) throws(NotesError) {
+        func fail(_ why: String) -> NotesError { .failed("could not mark the file names in the zip as UTF-8 (\(why)); nothing was exported") }
+        let file: FileHandle
+        do { file = try FileHandle(forUpdating: archive) } catch { throw fail(error.localizedDescription) }
+        defer { try? file.close() }
+        func read(at offset: UInt64, _ count: Int) throws(NotesError) -> [UInt8] {
+            do {
+                try file.seek(toOffset: offset)
+                let data = try file.read(upToCount: count) ?? Data()
+                guard data.count == count else { throw fail("the archive ends early") }
+                return [UInt8](data)
+            } catch let error as NotesError {
+                throw error
+            } catch {
+                throw fail(error.localizedDescription)
+            }
+        }
+        func write(_ bytes: [UInt8], at offset: UInt64) throws(NotesError) {
+            do {
+                try file.seek(toOffset: offset)
+                try file.write(contentsOf: Data(bytes))
+            } catch {
+                throw fail(error.localizedDescription)
+            }
+        }
+        func number(_ bytes: [UInt8], _ at: Int, _ width: Int) -> UInt64 {
+            (0..<width).reduce(UInt64(0)) { $0 | UInt64(bytes[at + $1]) << (8 * UInt64($1)) }
+        }
+
+        // End of central directory: the last 22 bytes, or further back if there is a comment.
+        let size: UInt64
+        do { size = try file.seekToEnd() } catch { throw fail(error.localizedDescription) }
+        guard size >= 22 else { throw fail("too short for a zip") }
+        let tailLength = Int(min(size, 22 + 65_535))
+        let tail = try read(at: size - UInt64(tailLength), tailLength)
+        guard let end = stride(from: tailLength - 22, through: 0, by: -1).first(where: { number(tail, $0, 4) == 0x0605_4b50 }) else {
+            throw fail("no end of central directory")
+        }
+        var entries = number(tail, end + 10, 2), directorySize = number(tail, end + 12, 4), directoryOffset = number(tail, end + 16, 4)
+        if entries == 0xFFFF || directorySize == 0xFFFF_FFFF || directoryOffset == 0xFFFF_FFFF {
+            // Zip64: the locator sits just before the end record and points at the zip64 record.
+            guard end >= 20, number(tail, end - 20, 4) == 0x0706_4b50 else { throw fail("no zip64 locator") }
+            let record = try read(at: number(tail, end - 12, 8), 56)
+            guard number(record, 0, 4) == 0x0606_4b50 else { throw fail("no zip64 end record") }
+            entries = number(record, 32, 8)
+            directorySize = number(record, 40, 8)
+            directoryOffset = number(record, 48, 8)
+        }
+        guard directorySize < 512 * 1024 * 1024 else { throw fail("central directory too large") }
+        var directory = try read(at: directoryOffset, Int(directorySize))
+
+        var position = 0
+        var localHeaders: [UInt64] = []
+        for _ in 0..<entries {
+            guard position + 46 <= directory.count, number(directory, position, 4) == 0x0201_4b50 else { throw fail("bad central directory") }
+            let nameLength = Int(number(directory, position + 28, 2)), extraLength = Int(number(directory, position + 30, 2))
+            let commentLength = Int(number(directory, position + 32, 2))
+            guard position + 46 + nameLength + extraLength + commentLength <= directory.count else { throw fail("bad central directory") }
+            let name = Array(directory[(position + 46)..<(position + 46 + nameLength)])
+            if String(validating: name, as: UTF8.self) != nil {
+                directory[position + 9] |= 0x08  // bit 11 of the little-endian flags at +8
+                var local = number(directory, position + 42, 4)
+                if local == 0xFFFF_FFFF {
+                    // The zip64 extra field lists, in order, only the sizes and offset that overflowed.
+                    var extra = position + 46 + nameLength
+                    let extraEnd = extra + extraLength
+                    var found = false
+                    while extra + 4 <= extraEnd {
+                        let id = number(directory, extra, 2), length = Int(number(directory, extra + 2, 2))
+                        if id == 0x0001 {
+                            var field = extra + 4
+                            if number(directory, position + 24, 4) == 0xFFFF_FFFF { field += 8 }
+                            if number(directory, position + 20, 4) == 0xFFFF_FFFF { field += 8 }
+                            guard field + 8 <= extra + 4 + length else { throw fail("bad zip64 extra field") }
+                            local = number(directory, field, 8)
+                            found = true
+                            break
+                        }
+                        extra += 4 + length
+                    }
+                    guard found else { throw fail("no zip64 offset for an entry") }
+                }
+                localHeaders.append(local)
+            }
+            position += 46 + nameLength + extraLength + commentLength
+        }
+        for offset in localHeaders {
+            var header = try read(at: offset, 8)
+            guard number(header, 0, 4) == 0x0403_4b50 else { throw fail("bad local header") }
+            header[7] |= 0x08
+            try write([header[6], header[7]], at: offset + 6)
+        }
+        try write(directory, at: directoryOffset)
     }
 }
 

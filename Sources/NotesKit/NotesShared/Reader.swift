@@ -79,7 +79,7 @@ struct Reader {
             content.append(.text(TextRun(text, marks: marks, link: link)))
         }
         if let failure { throw failure }
-        return .paragraph(Paragraph(kind: kind, indent: indent, quote: quote, content: content.coalesced()))
+        return .paragraph(Paragraph(kind: kind, indent: indent, quote: quote, content: content.normalized()))
     }
 
     static func kind(_ style: NSObject?) -> ParagraphKind {

@@ -164,7 +164,7 @@ public enum MarkdownParser {
             i += 1
         }
         flush()
-        return out.coalesced()
+        return out.normalized()
     }
 
     /// Reads `[label](target)` starting at an opening bracket, honouring backslash escapes.

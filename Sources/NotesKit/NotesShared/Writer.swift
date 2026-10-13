@@ -638,6 +638,13 @@ final class Writer {
         guard let attachment = created as? NSObject, let id = attachment.value(forKey: "identifier") as? String else {
             throw .frameworkChanged("addTableAttachmentWithText: returned no attachment")
         }
+        // The text above separates cells with tabs and rows with newlines, so a cell holding
+        // either came out flattened to spaces (`5<br>箱` read back as "5 箱", 2026-10-14). Those
+        // cells are set again through the table model, as an in-place edit would.
+        // 当 Notes 提供能直接带单元格换行建表的接口时，去掉这一步。
+        if table.rows.contains(where: { $0.contains { $0.contains("\n") || $0.contains("\t") } }) {
+            try TableEditor(attachmentID: id, context: context).apply(table.rows)
+        }
         let marker = markerClass.init()
         marker.setValue(id, forKey: "attachmentIdentifier")
         marker.setValue("com.apple.notes.table", forKey: "attachmentUTI")

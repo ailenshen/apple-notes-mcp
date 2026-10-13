@@ -69,7 +69,10 @@ extension NotesRepository {
         if let text = string("ocrSummary") { extracted.append(("Text Notes recognized (may be inaccurate)", text)) }
         if let text = string("handwritingSummary") { extracted.append(("Handwriting Notes recognized (may be inaccurate)", text)) }
         if let text = string("imageClassificationSummary") { extracted.append(("What Notes thinks the image shows (may be inaccurate)", text)) }
-        if let text = attachment.value(forKey: "summary") as? String, !text.isEmpty { extracted.append(("Summary", text)) }
+        // A table's summary is its cell text, one cell per line, which the rows already give.
+        if uti != "com.apple.notes.table", let text = attachment.value(forKey: "summary") as? String, !text.isEmpty {
+            extracted.append(("Summary", text))
+        }
         var pages: [AttachmentInfo] = []
         if let subs = attachment.value(forKey: "subAttachments") as? Set<NSManagedObject> {
             let ordered = subs.filter { ($0.value(forKey: "markedForDeletion") as? Bool) != true }

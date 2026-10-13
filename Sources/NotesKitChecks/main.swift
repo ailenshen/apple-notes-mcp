@@ -84,7 +84,59 @@ func unitChecks() {
         expect((try? ExportFiles.destination(refused)) == nil, "export destination \(refused) should be refused")
     }
     expect((try? ExportFiles.destination("~/Documents/MCP Test export \(UUID().uuidString).zip")) != nil, "a new path under Documents is accepted")
+    // Bold, italic and strikethrough never open after or close before a space; underline and
+    // highlight keep their spaces; spaces inside a span stay marked.
+    let edges = [para(.heading, [text("🌾"), text(" 草原 ", .bold), text("x"), text(" s ", .strike), text(" i", .italic),
+                                 text(" u ", .underline), text("a b", .bold), text(" ", .bold)])]
+    let edgeMarkdown = MarkdownRenderer.render(MarkdownParser.parse(MarkdownRenderer.render(edges)))
+    expect(edgeMarkdown == "## 🌾 **草原** x ~~s~~  *i*<u> u </u>**a b** ", "edge spaces outside delimiters: \(edgeMarkdown)")
+    let normalizedEdges = MarkdownParser.parse(edgeMarkdown)
+    expect(MarkdownParser.parse(MarkdownRenderer.render(normalizedEdges)) == normalizedEdges, "normalized form round-trips")
+    expect(MarkdownParser.parse("** 粗**") == [para(.body, [text(" "), text("粗", .bold)])], "a parsed edge space is not bold: \(MarkdownParser.parse("** 粗**"))")
+    // Extracted descriptions skip separator lines.
+    let extracted = DescriptionIndex.extract(fromPlainText: "酒\n\n⸻\n麦卡伦 12年 雪莉桶。饱满。", title: "酒")
+    expect(extracted == "麦卡伦 12年 雪莉桶。", "description skips separators: \(extracted)")
+    zipNameCheck()
     print(failures == 0 ? "unit: all passed" : "unit: \(failures) failed")
+}
+
+/// A zip made by ditto, then marked: every entry must carry the UTF-8 flag, and the archive
+/// must still extract with its Chinese names intact.
+@MainActor
+func zipNameCheck() {
+    let files = FileManager.default
+    let base = files.temporaryDirectory.appendingPathComponent("MCP Test zip \(UUID().uuidString)")
+    defer { try? files.removeItem(at: base) }
+    let source = base.appendingPathComponent("导出")
+    let archive = base.appendingPathComponent("导出.zip")
+    let extracted = base.appendingPathComponent("extracted")
+    func ditto(_ arguments: [String]) -> Int32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        process.arguments = arguments
+        try? process.run()
+        process.waitUntilExit()
+        return process.terminationStatus
+    }
+    do {
+        try files.createDirectory(at: source.appendingPathComponent("子文件夹"), withIntermediateDirectories: true)
+        try Data("内容".utf8).write(to: source.appendingPathComponent("子文件夹/笔记.md"))
+        try Data("ascii".utf8).write(to: source.appendingPathComponent("manifest.md"))
+        guard ditto(["-c", "-k", "--sequesterRsrc", "--keepParent", source.path, archive.path]) == 0 else { return expect(false, "ditto failed") }
+        try ExportFiles.markNamesAsUTF8(archive)
+        let bytes = [UInt8](try Data(contentsOf: archive))
+        func flags(_ signature: [UInt8], at offset: Int) -> [UInt8] {
+            (0..<(bytes.count - 4)).filter { Array(bytes[$0..<($0 + 4)]) == signature }.map { bytes[$0 + offset] }
+        }
+        let central = flags([0x50, 0x4b, 0x01, 0x02], at: 9), local = flags([0x50, 0x4b, 0x03, 0x04], at: 7)
+        expect(central.count == 4 && local.count == 4, "zip entries: \(central.count) central, \(local.count) local")
+        expect((central + local).allSatisfy { $0 & 0x08 != 0 }, "every zip entry is marked UTF-8")
+        guard ditto(["-x", "-k", archive.path, extracted.path]) == 0 else { return expect(false, "the marked zip does not extract") }
+        let content = try? String(contentsOf: extracted.appendingPathComponent("导出/子文件夹/笔记.md"), encoding: .utf8)
+        expect(content == "内容", "the marked zip extracts with its names")
+    } catch {
+        expect(false, "zip check: \(error)")
+    }
 }
 
 /// Exports a real folder (read-only for Notes) and checks the output: every note is in the
@@ -324,14 +376,14 @@ func writeTest() async {
         let report = try await sync.settle(id: id)
         return report.synced ? nil : "not synced after \(report.total): \(report.state)"
     }
-    await step("removing an attachment-free table and full replace") {
+    await step("removing a table, and a full replace with a new table holding a line break in a cell") {
         let replacement = MarkdownParser.parse("""
             # \(title) replaced
             Completely new body.
             - [ ] fresh task
             | A | B | C |
             | --- | --- | --- |
-            | 1 | 2 | 3 |
+            | 1 | 2<br>two | 3 |
             """)
         let outcome = try repository.update(id: id, expectedVersion: nil) { _ throws(NotesError) in replacement }
         return outcome.mismatch
@@ -352,6 +404,12 @@ case "export":
     // export <folder> <new directory>: read-only for Notes; writes only the directory.
     let args = Array(CommandLine.arguments.dropFirst(2))
     if args.count == 2 { await exportCheck(folder: args[0], destination: args[1]) } else { print("usage: NotesKitChecks export <folder> <new directory>") }
+case "markzip":
+    // markzip <archive>: marks the names in an existing zip as UTF-8, to try zip64 archives
+    // made by other tools (ditto writes zip64 only past 4 GB).
+    if let path = CommandLine.arguments.dropFirst(2).first {
+        do { try ExportFiles.markNamesAsUTF8(URL(fileURLWithPath: path)); print("marked") } catch { print("error:", error); failures += 1 }
+    } else { print("usage: NotesKitChecks markzip <archive>") }
 case "create":
     // Reads Markdown from stdin and creates a note with it (write guard on).
     let markdown = String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self)
@@ -361,6 +419,6 @@ case "create":
         let report = try await SyncCoordinator(repository: NotesRepository()).settle(id: outcome.id)
         print("synced:", report.synced)
     } catch { print("error:", error) }
-default: print("usage: NotesKitChecks unit|roundtrip|render <id>…|writetest|export <folder> <dir>|create < markdown")
+default: print("usage: NotesKitChecks unit|roundtrip|render <id>…|writetest|export <folder> <dir>|markzip <archive>|create < markdown")
 }
 exit(failures == 0 ? 0 : 1)
