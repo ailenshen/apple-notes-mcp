@@ -1,12 +1,18 @@
 import Foundation
+import Synchronization
 
 // Minimal MCP 2026-07-28 server: stateless, per-request `_meta`, no initialize handshake.
 // Only server/discover, tools/list and tools/call are served; every other method is -32601.
+// Clients that still open with `initialize` (e.g. Cowork and Code sessions in Claude.app) get
+// the legacy handshake instead: after it, requests without `_meta` are served in that version.
 // Source of truth: schema/2026-07-28/schema.ts and docs/specification/2026-07-28 in
 // github.com/modelcontextprotocol/modelcontextprotocol (tag 2026-07-28).
 // 当需要 progress、取消、resources 等能力时，在这里按规范逐项加入，不要预先实现。
 
 public let protocolVersion = "2026-07-28"
+
+/// Pre-2026 versions accepted through `initialize`, newest first.
+public let legacyProtocolVersions = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]
 
 /// A tool result. Business failures go here with `isError: true` so the model can self-correct.
 public struct ToolResult: Sendable {
@@ -106,6 +112,9 @@ public final class Server: Sendable {
     /// Freshness hint for discover and tools/list. The tool set only changes with a new build,
     /// and a new build means a new stdio process.
     let ttlMs = 3_600_000
+    /// The version agreed through `initialize`, set once a legacy client connects. A stdio
+    /// process serves exactly one client, so this is per-connection state.
+    let legacyVersion = Mutex<String?>(nil)
 
     public init(info: ServerInfo, tools: [any Tool]) {
         self.info = info
@@ -141,16 +150,18 @@ public final class Server: Sendable {
     }
 
     private func dispatch(method: String, params: [String: JSONValue]) async throws -> [String: JSONValue] {
-        guard ["server/discover", "tools/list", "tools/call"].contains(method) else {
-            if method == "initialize" {
-                throw MCPError(
-                    code: -32601,
-                    message: "initialize is not supported: this server only speaks MCP \(protocolVersion)",
-                    data: ["supported": [.string(protocolVersion)]])
-            }
+        if method == "initialize" { return initialize(params) }
+        // A legacy session sends no per-request `_meta` version; a request that does carry one
+        // is answered under 2026-07-28 rules as usual.
+        let legacy = legacyVersion.withLock { $0 } != nil
+            && params["_meta"]?["io.modelcontextprotocol/protocolVersion"] == nil
+        if legacy && method == "ping" { return [:] }
+        guard ["server/discover", "tools/list", "tools/call"].contains(method), !(legacy && method == "server/discover")
+        else {
             throw MCPError(code: -32601, message: "Method not found: \(method)")
         }
-        try validateMeta(params["_meta"])
+        if !legacy { try validateMeta(params["_meta"]) }
+        let complete = legacy ? { $0 } : self.complete
         switch method {
         case "server/discover":
             var result: [String: JSONValue] = [
@@ -196,6 +207,20 @@ public final class Server: Sendable {
                 "isError": .bool(outcome.isError),
             ])
         }
+    }
+
+    /// Legacy handshake: echo the client's version when it is one we know, else offer the newest.
+    private func initialize(_ params: [String: JSONValue]) -> [String: JSONValue] {
+        let requested = params["protocolVersion"]?.stringValue ?? ""
+        let version = legacyProtocolVersions.contains(requested) ? requested : legacyProtocolVersions[0]
+        legacyVersion.withLock { $0 = version }
+        var result: [String: JSONValue] = [
+            "protocolVersion": .string(version),
+            "capabilities": ["tools": [:]],
+            "serverInfo": ["name": .string(info.name), "version": .string(info.version)],
+        ]
+        if let instructions = info.instructions { result["instructions"] = .string(instructions) }
+        return result
     }
 
     /// Every request must carry its protocol version and client capabilities (SEP-2575).
