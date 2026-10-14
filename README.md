@@ -14,7 +14,7 @@ Claude edits your notes the way you would: change one line or tick a checkbox, a
   <img alt="Apple Notes MCP" src="assets/screenshot-light.png">
 </picture>
 
-**Requires:** macOS 26 (Tahoe) or later, [Node.js](https://nodejs.org/) 24+, and a client that speaks MCP 2026-07-28: Claude Code 2.1.296 or later, an up-to-date Claude Desktop, or claude.ai
+**Requires:** macOS 26 (Tahoe) or later, [Node.js](https://nodejs.org/) 24+, and an MCP client. Clients that speak MCP 2026-07-28 (Claude Code 2.1.296 or later, an up-to-date Claude Desktop, claude.ai) use it directly; older clients, including Cowork and Code sessions in Claude.app, fall back to the `initialize` handshake (2024-11-05 through 2025-11-25)
 
 ## Setup
 
