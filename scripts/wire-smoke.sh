@@ -73,8 +73,8 @@ legacy_cases = [
         and r["result"]["serverInfo"]["name"] == "apple-notes-mcp" else r),
     ("legacy: initialized notification", {"method": "notifications/initialized"}, None),
     ("legacy: ping", {"id": 2, "method": "ping"}, lambda r: None if r["result"] == {} else r),
-    ("legacy: tools/list without _meta", {"id": 3, "method": "tools/list"},
-     lambda r: None if any(t["name"] == "read_note" for t in r["result"]["tools"]) and "resultType" not in r["result"] else r),
+    ("legacy: tools/list without _meta, without 2026-07-28 fields", {"id": 3, "method": "tools/list"},
+     lambda r: None if any(t["name"] == "read_note" for t in r["result"]["tools"]) and set(r["result"]) == {"tools"} else r),
     ("legacy: bad arguments -> -32602", {"id": 4, "method": "tools/call", "params": {"name": "read_note", "arguments": {"id": 5}}},
      lambda r: None if r["error"]["code"] == -32602 else r),
     ("legacy: request with _meta still gets 2026-07-28 rules", {"id": 5, "method": "server/discover", "params": {"_meta": META}},
@@ -92,6 +92,10 @@ legacy_unknown = subprocess.run([sys.argv[1]], input=json.dumps({"jsonrpc": "2.0
 r = json.loads(legacy_unknown.stdout)
 ok = r["result"]["protocolVersion"] == "2025-11-25"
 print(("ok   " if ok else "FAIL ") + "legacy: unknown version gets the newest legacy one")
+failed += not ok
+# The stderr line is the evidence for removing the fallback one day (see Server.swift).
+ok = "legacy initialize: unnamed client asked for 1999-01-01, got 2025-11-25" in legacy_unknown.stderr
+print(("ok   " if ok else "FAIL ") + "legacy: the handshake is logged to stderr" + ("" if ok else f": {legacy_unknown.stderr!r}"))
 failed += not ok
 sys.exit(1 if failed else 0)
 EOF

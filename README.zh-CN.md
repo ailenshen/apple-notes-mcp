@@ -14,7 +14,7 @@ Claude 改备忘录的方式和你自己改一样：只改一行字、勾一个�
   <img alt="Apple Notes MCP" src="assets/screenshot-light.png">
 </picture>
 
-**要求：** macOS 26（Tahoe）或更新版本，[Node.js](https://nodejs.org/) 24+，以及支持 MCP 2026-07-28 的客户端：Claude Code 2.1.296 或更新版本、最新版 Claude Desktop，或 claude.ai
+**要求：** macOS 26（Tahoe）或更新版本，[Node.js](https://nodejs.org/) 24+，以及 Claude Code、Claude Desktop（包括 Cowork 和 Code 会话）或 claude.ai。其他 MCP 客户端也能用：它支持 MCP 2026-07-28，也支持较早的 `initialize` 握手（2024-11-05 至 2025-11-25）
 
 ## 安装
 
